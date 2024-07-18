@@ -14,7 +14,6 @@ module exe_stage(
     output [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus   ,
     // data sram interface
     output                         data_sram_en   ,
-/* 	output [                  1:0] data_sram_size , */
     output [                  3:0] data_sram_we   ,
     output [                 31:0] data_sram_addr ,
     output [                 31:0] data_sram_wdata,
@@ -38,9 +37,7 @@ module exe_stage(
 reg es_valid;
 wire es_ready_go;
 reg data_sram_en_r;
-/* reg [1:0] data_sram_size_r; */
 reg [3:0] data_sram_we_r;
-/* reg [31:0] data_sram_addr_r; */
 reg [31:0] data_sram_wdata_r;
 
 wire es_is_icacop_h;
@@ -236,15 +233,28 @@ assign {es_is_cacop_h  ,
 wire [31:0] es_alu_src1   ;
 wire [31:0] es_alu_src2   ;
 wire [31:0] es_alu_result ;
+
+wire special_res;
+assign special_res = is_div_w | is_div_wu | is_mul_w | is_mulh_w | is_mulh_wu | is_mod_w | is_mod_wu;
+
+assign es_final_result = special_res ?
+						({32{is_div_w}}  & div_w_res[63:32]    |
+						 {32{is_div_wu}} & div_wu_res[63:32]   | 
+						 {32{is_mul_w}}  & signed_prod[31:0]   |  
+						 {32{is_mulh_w}} & signed_prod[63:32]  | 
+						 {32{is_mulh_wu}}& unsigned_prod[63:32]|  
+						 {32{is_mod_w}}  & div_w_res[31:0]     | 
+						 {32{is_mod_wu}} & div_wu_res[31:0]     ) : 
+						 es_alu_result;
 					  
-assign es_final_result = is_div_w  ? div_w_res[63:32]     : 
+/* assign es_final_result = is_div_w  ? div_w_res[63:32]     : 
 						 is_div_wu ? div_wu_res[63:32]    : 
 						 is_mul_w  ? signed_prod[31:0]    : 
 						 is_mulh_w ? signed_prod[63:32]   :
 						 is_mulh_wu? unsigned_prod[63:32] : 
 						 is_mod_w  ? div_w_res[31:0]      :
 						 is_mod_wu ? div_wu_res[31:0]     :
-						 es_alu_result;
+						 es_alu_result; */
 						 
 assign es_refetch = es_refetch_help && es_valid;
 						 

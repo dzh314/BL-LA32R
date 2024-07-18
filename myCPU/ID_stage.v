@@ -32,7 +32,6 @@ reg         ds_valid    ;
 wire        ds_ready_go ;
 
 reg         bran_delay_r;
-wire		is_bd       ;
 wire		ds_ex		;
 wire [5:0]  ds_ecode    ;
 wire        fs_ex       ;
@@ -43,8 +42,6 @@ wire        ws_ex       ;
 wire		ws_is_ertn  ;
 wire		is_instr    ;
 wire es_tlb_stall, ms_tlb_stall, ws_tlb_stall;
-
-assign		is_bd = bran_delay_r & ds_valid;
 
 wire [31                 :0] fs_pc;
 reg  [`FS_TO_DS_BUS_WD -1:0] fs_to_ds_bus_r;
@@ -77,8 +74,8 @@ wire [31:0] br_target;
 
 wire [18:0] alu_op;
 wire        src1_is_pc;
-wire        src2_is_imm;
-wire        res_from_mem;
+wire        src2_is_imm;/* 
+wire        res_from_mem; */
 wire        dst_is_r1;
 wire        src_reg_is_rd;
 wire        gr_we;
@@ -242,7 +239,7 @@ assign ds_to_es_bus = {inst_cacop    , //230
 					   src2_is_imm   , //150:150
 					   src1_is_pc    , //149:149
 					   alu_op        , //148:131
-					   res_from_mem  , //130:130
+					   inst_ld_w     , //130:130
 					   gr_we         , //129:129
 					   mem_we        , //128:128
 					   dest          , //127:96
@@ -413,11 +410,16 @@ assign need_si26  =  inst_b | inst_bl;
 assign need_ui12  = inst_andi | inst_ori | inst_xori;
 assign src2_is_4  =  inst_jirl | inst_bl;
 
-assign imm = src2_is_4 ? 32'h4                      :
+assign imm = {32{src2_is_4}} & 32'h4
+		   | {32{need_si20}} & {i20[19:0], 12'b0} 
+		   | {32{need_si12}} & {{20{i12[11]}}, i12[11:0]}
+		   | {32{need_ui12}} & {20'b0, i12}
+		   | {32{need_ui5}}  & {27'b0, rk};
+/* assign imm = src2_is_4 ? 32'h4                      :
              need_si20 ? {i20[19:0], 12'b0}         :
              need_si12 ? {{20{i12[11]}}, i12[11:0]} :
 			 need_ui12 ? {20'b0, i12}               :
-		   /* need_ui5 */{27'b0, rk}                ;
+		   /* need_ui5 {27'b0, rk}                ; */
   
 
 assign br_offs = need_si26 ? {{ 4{i26[25]}}, i26[25:0], 2'b0} :
@@ -452,7 +454,7 @@ assign src2_is_imm   = inst_slli_w   |
 					   inst_st_h     |
 					   inst_cacop    ;
 
-assign res_from_mem  = inst_ld_w | inst_ld_b | inst_ld_h | inst_ld_bu | inst_ld_hu;
+/* assign res_from_mem  = inst_ld_w | inst_ld_b | inst_ld_h | inst_ld_bu | inst_ld_hu; */
 assign dst_is_r1     = inst_bl;
 assign gr_we         = ~inst_st_w & ~inst_beq & ~inst_bne & ~inst_b & ~inst_blt & ~inst_bge & ~inst_bltu & ~inst_bgeu 
 					 & ~inst_st_b & ~inst_st_h & ~inst_tlbsrch & ~inst_tlbrd & ~inst_tlbwr & ~inst_tlbfill & ~inst_invtlb & ~inst_cacop;

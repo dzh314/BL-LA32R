@@ -372,37 +372,36 @@ assign ws_to_tlb_bus = {csr_dmw3_plv , //184:181
 					   };
 
 
-// 读CSR 不知道是这种三目运算符好，还是原来mips那种32位或好，后面测试一下看看
+// 读CSR
 wire [31:0] csr_result;
-assign csr_result = is_csr_dmw0      ? {csr_dmw0_vseg, 1'b0, csr_dmw0_pseg, 19'b0, csr_dmw0_mat, csr_dmw0_plv} :
-					is_csr_dmw1      ? {csr_dmw1_vseg, 1'b0, csr_dmw1_pseg, 19'b0, csr_dmw1_mat, csr_dmw1_plv} :
-					is_csr_dmw2      ? {csr_dmw2_vseg, 1'b0, csr_dmw2_pseg, 19'b0, csr_dmw2_mat, csr_dmw2_plv} :
-					is_csr_dmw3      ? {csr_dmw3_vseg, 1'b0, csr_dmw3_pseg, 19'b0, csr_dmw3_mat, csr_dmw3_plv} :
-					is_csr_tlbrprmd  ? {27'b0, csr_tlbrprmd_pwe, 1'b0, csr_tlbrprmd_pwe, csr_tlbrprmd_pplv} :
-					is_csr_tlbrehi   ? {csr_tlbrehi_vppn, 7'b0, csr_tlbrehi_ps} :
-					is_csr_tlbrbadv  ? csr_tlbrbadv_vaddr :
-					is_csr_tlbrera   ? {csr_tlbrera_pc, 1'b0, csr_tlbrera_istlbr} :
-					is_csr_tlbrentry ? {csr_tlbrentry_ppn, 12'b0} :
-					is_csr_tlbelo1   ? {4'b0, csr_tlbelo1_ppn, 1'b0, csr_tlbelo1_g, csr_tlbelo1_mat, csr_tlbelo1_plv, csr_tlbelo1_d, csr_tlbelo1_v} :
-					is_csr_tlbelo0   ? {4'b0, csr_tlbelo0_ppn, 1'b0, csr_tlbelo0_g, csr_tlbelo0_mat, csr_tlbelo0_plv, csr_tlbelo0_d, csr_tlbelo0_v} :
-					is_csr_tlbidx    ? {csr_tlbidx_ne, 1'b0, csr_tlbidx_ps, 20'b0, csr_tlbidx_index} :
-					is_csr_tlbehi    ? {csr_tlbehi_vppn, 13'b0} : 
-					is_csr_asid      ? {8'b0, 8'h0a, 6'b0, csr_asid_asid} : 
-					is_csr_badv      ? csr_badv_vaddr :
-					is_csr_ecfg      ? {13'b0, csr_ecfg_vs, 3'b0, csr_ecfg_lie} :
-					is_csr_tval      ? csr_tval_timeval : 
-					is_csr_tcfg      ? {csr_tcfg_initval, csr_tcfg_periodic, csr_tcfg_en} : 
-					is_csr_tid       ? csr_tid : 
-					is_csr_save3     ? csr_save3 : 
-					is_csr_save2     ? csr_save2 : 
-					is_csr_save1     ? csr_save1 : 
-					is_csr_save0     ? csr_save0 : 
-					is_csr_era       ? csr_era_pc : 
-					is_csr_estat     ? {1'b0, csr_estat_esubcode, csr_estat_ecode, 3'b0, csr_estat_is_r, csr_estat_is_rw} :
-					is_csr_prmd      ? {28'h0, csr_prmd_pwe, csr_prmd_pie, csr_prmd_pplv} :
-					is_csr_eentry    ? {csr_eentry_vpn, 12'b0} :
-					is_csr_crmd      ? {22'b0, csr_crmd_we, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv}
-					                 : 32'b0;
+assign csr_result = {32{is_csr_dmw0     }} & {csr_dmw0_vseg, 1'b0, csr_dmw0_pseg, 19'b0, csr_dmw0_mat, csr_dmw0_plv} |
+					{32{is_csr_dmw1     }} & {csr_dmw1_vseg, 1'b0, csr_dmw1_pseg, 19'b0, csr_dmw1_mat, csr_dmw1_plv} |
+					{32{is_csr_dmw2     }} & {csr_dmw2_vseg, 1'b0, csr_dmw2_pseg, 19'b0, csr_dmw2_mat, csr_dmw2_plv} |
+					{32{is_csr_dmw3     }} & {csr_dmw3_vseg, 1'b0, csr_dmw3_pseg, 19'b0, csr_dmw3_mat, csr_dmw3_plv} |
+					{32{is_csr_tlbrprmd }} & {27'b0, csr_tlbrprmd_pwe, 1'b0, csr_tlbrprmd_pwe, csr_tlbrprmd_pplv} |
+					{32{is_csr_tlbrehi  }} & {csr_tlbrehi_vppn, 7'b0, csr_tlbrehi_ps} |
+					{32{is_csr_tlbrbadv }} & csr_tlbrbadv_vaddr |
+					{32{is_csr_tlbrera  }} & {csr_tlbrera_pc, 1'b0, csr_tlbrera_istlbr} |
+					{32{is_csr_tlbrentry}} & {csr_tlbrentry_ppn, 12'b0} |
+					{32{is_csr_tlbelo1  }} & {4'b0, csr_tlbelo1_ppn, 1'b0, csr_tlbelo1_g, csr_tlbelo1_mat, csr_tlbelo1_plv, csr_tlbelo1_d, csr_tlbelo1_v} |
+					{32{is_csr_tlbelo0  }} & {4'b0, csr_tlbelo0_ppn, 1'b0, csr_tlbelo0_g, csr_tlbelo0_mat, csr_tlbelo0_plv, csr_tlbelo0_d, csr_tlbelo0_v} |
+					{32{is_csr_tlbidx   }} & {csr_tlbidx_ne, 1'b0, csr_tlbidx_ps, 20'b0, csr_tlbidx_index} |
+					{32{is_csr_tlbehi   }} & {csr_tlbehi_vppn, 13'b0} | 
+					{32{is_csr_asid     }} & {8'b0, 8'h0a, 6'b0, csr_asid_asid} | 
+					{32{is_csr_badv     }} & csr_badv_vaddr |
+					{32{is_csr_ecfg     }} & {13'b0, csr_ecfg_vs, 3'b0, csr_ecfg_lie} |
+					{32{is_csr_tval     }} & csr_tval_timeval | 
+					{32{is_csr_tcfg     }} & {csr_tcfg_initval, csr_tcfg_periodic, csr_tcfg_en} | 
+					{32{is_csr_tid      }} & csr_tid | 
+					{32{is_csr_save3    }} & csr_save3 | 
+					{32{is_csr_save2    }} & csr_save2 | 
+					{32{is_csr_save1    }} & csr_save1 |
+					{32{is_csr_save0    }} & csr_save0 | 
+					{32{is_csr_era      }} & csr_era_pc | 
+					{32{is_csr_estat    }} & {1'b0, csr_estat_esubcode, csr_estat_ecode, 3'b0, csr_estat_is_r, csr_estat_is_rw} |
+					{32{is_csr_prmd     }} & {28'h0, csr_prmd_pwe, csr_prmd_pie, csr_prmd_pplv} |
+					{32{is_csr_eentry   }} & {csr_eentry_vpn, 12'b0} |
+					{32{is_csr_crmd     }} & {22'b0, csr_crmd_we, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv};
 
 // 写CSR
 wire [31:0] xchg_result;

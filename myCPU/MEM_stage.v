@@ -48,7 +48,7 @@ wire		ms_is_invtlb   ;
 wire [31:0] mask           ;
 wire [13:0] csr            ;
 wire [ 1:0] addr           ;
-wire        ms_res_from_mem;
+wire        ms_is_ld_w;
 wire        ms_gr_we       ;
 wire [ 4:0] ms_dest        ;
 wire [31:0] ms_alu_result  ;
@@ -94,7 +94,7 @@ assign {s0_ex           ,
 		ms_is_ld_bu     ,
 		ms_is_ld_h      ,
 		ms_is_ld_b      ,
-		ms_res_from_mem ,
+		ms_is_ld_w ,
 		ms_gr_we        ,
 		ms_dest         ,
 		ms_alu_result   ,
@@ -176,12 +176,22 @@ wire [15:0] ld_h_help;
 assign ld_b_help = (addr == 2'b11) ? mem_result[31:24] : (addr == 2'b10) ? mem_result[23:16] : (addr == 2'b01) ? mem_result[15:8] : mem_result[7:0];
 assign ld_h_help = (addr == 2'b10) ? mem_result[31:16] : mem_result[15:0];
 
+wire special_res;
+assign special_res = ms_is_ld_b | ms_is_ld_h | ms_is_ld_bu | ms_is_ld_hu | ms_is_ld_w;
 assign ms_final_result = (ms_ex || s1_refill_ex) ? ms_alu_result                    :
+						 special_res ? 
+						({32{ms_is_ld_b}}              & {{24{ld_b_help[7]}}, ld_b_help}  | 
+						 {32{ms_is_ld_h}}              & {{16{ld_h_help[15]}}, ld_h_help} |
+						 {32{ms_is_ld_bu}}             & {24'b0, ld_b_help}               | 
+						 {32{ms_is_ld_hu}}             & {16'b0, ld_h_help}               |
+						 {32{ms_is_ld_w}}         & mem_result                        )
+						: ms_alu_result;
+/* assign ms_final_result = (ms_ex || s1_refill_ex) ? ms_alu_result                    :
 						 ms_is_ld_b              ? {{24{ld_b_help[7]}}, ld_b_help}  : 
 						 ms_is_ld_h              ? {{16{ld_h_help[15]}}, ld_h_help} :
 						 ms_is_ld_bu             ? {24'b0, ld_b_help}               : 
 						 ms_is_ld_hu             ? {16'b0, ld_h_help}               :
-						 ms_res_from_mem         ? mem_result                       : ms_alu_result;
+						 ms_is_ld_w         ? mem_result                       : ms_alu_result; */
 
 assign ms_to_es_bus = ms_ex | ms_is_ertn;
 
