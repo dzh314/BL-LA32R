@@ -1,0 +1,3 @@
+[submodule "branch_predictor"]
+	path = branch_predictor
+	url = https://github.com/lingkerio/branch_predictor.git
