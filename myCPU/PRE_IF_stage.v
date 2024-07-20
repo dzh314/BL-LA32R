@@ -9,7 +9,7 @@ module pre_if_stage(
     input  [`BR_BUS_WD        -1:0] br_bus         ,
 	//wrongPC_br
 	output reg                      wrongPC_br     , //wrongPC_br：id_stage置br_taken有效，但此前已经发出错误指令的读请求
-	output                          wrong_req_r    ,
+	output reg                      wrong_req_r    ,
 	output reg                      br_bus_r_valid ,
     //to fs
     output                          ps_to_fs_valid ,
