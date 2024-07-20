@@ -59,7 +59,6 @@ reg  [          19:0] ppn_r             ;
 wire                  br_taken          ; 
 wire [          31:0] br_target         ;
 reg  [`BR_BUS_WD-1:0] br_bus_r          ;
-reg                   wrong_req_r       ;
 reg                   refetch_r         ;
 reg                   inst_sram_en_r    ;
 reg                   should_keep       ;
