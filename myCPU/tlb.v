@@ -88,20 +88,61 @@ reg  [        1:0] tlb_plv1     [`TLBNUM-1:0];
 reg  [        1:0] tlb_mat1     [`TLBNUM-1:0];
 reg                tlb_d1       [`TLBNUM-1:0];
 reg                tlb_v1       [`TLBNUM-1:0];
-wire [`TLBNUM-1:0] match0                    ;
-wire [`TLBNUM-1:0] match1                    ;
+wire [       15:0] match0                    ;
+wire [       15:0] match1                    ;
 
 
 //search
-generate
-    for (genvar i = 0; i < `TLBNUM; i = i + 1) begin : match_gen0
-        assign match0[i] = (s0_vppn[18:9]==tlb_vppn[i][18:9])
-                 && (tlb_ps2MB[i] || s0_vppn[8:0]==tlb_vppn[i][8:0])
-                 && ((s0_asid==tlb_asid[i]) || tlb_g[i])
-                 && tlb_e[i];
-    end
-endgenerate
-/* assign match0[ 0] = (s0_vppn[18:9]==tlb_vppn[ 0][18:9])
+/* assign match0[ 0] = (s0_vppn[18:10]==tlb_vppn[ 0][18:10])
+                 && (tlb_ps4MB[ 0] || s0_vppn[9:0]==tlb_vppn[ 0][9:0])
+                 && ((s0_asid==tlb_asid[ 0]) || tlb_g[ 0]);
+assign match0[ 1] = (s0_vppn[18:10]==tlb_vppn[ 1][18:10])
+                 && (tlb_ps4MB[ 1] || s0_vppn[9:0]==tlb_vppn[ 1][9:0])
+                 && ((s0_asid==tlb_asid[ 1]) || tlb_g[ 1]);
+assign match0[ 2] = (s0_vppn[18:10]==tlb_vppn[ 2][18:10])
+                 && (tlb_ps4MB[ 2] || s0_vppn[9:0]==tlb_vppn[ 2][9:0])
+                 && ((s0_asid==tlb_asid[ 2]) || tlb_g[ 1]);
+assign match0[ 3] = (s0_vppn[18:10]==tlb_vppn[ 3][18:10])
+                 && (tlb_ps4MB[ 3] || s0_vppn[9:0]==tlb_vppn[ 3][9:0])
+                 && ((s0_asid==tlb_asid[ 3]) || tlb_g[ 3]);
+assign match0[ 4] = (s0_vppn[18:10]==tlb_vppn[ 4][18:10])
+                 && (tlb_ps4MB[ 4] || s0_vppn[9:0]==tlb_vppn[ 4][9:0])
+                 && ((s0_asid==tlb_asid[ 4]) || tlb_g[ 4]);
+assign match0[ 5] = (s0_vppn[18:10]==tlb_vppn[ 5][18:10])
+                 && (tlb_ps4MB[ 5] || s0_vppn[9:0]==tlb_vppn[ 5][9:0])
+                 && ((s0_asid==tlb_asid[ 5]) || tlb_g[ 5]);
+assign match0[ 6] = (s0_vppn[18:10]==tlb_vppn[ 6][18:10])
+                 && (tlb_ps4MB[ 6] || s0_vppn[9:0]==tlb_vppn[ 6][9:0])
+                 && ((s0_asid==tlb_asid[ 6]) || tlb_g[ 6]);
+assign match0[ 7] = (s0_vppn[18:10]==tlb_vppn[ 7][18:10])
+                 && (tlb_ps4MB[ 7] || s0_vppn[9:0]==tlb_vppn[ 7][9:0])
+                 && ((s0_asid==tlb_asid[ 7]) || tlb_g[ 7]);
+assign match0[ 8] = (s0_vppn[18:10]==tlb_vppn[ 8][18:10])
+                 && (tlb_ps4MB[ 8] || s0_vppn[9:0]==tlb_vppn[ 8][9:0])
+                 && ((s0_asid==tlb_asid[ 8]) || tlb_g[ 8]);
+assign match0[ 9] = (s0_vppn[18:10]==tlb_vppn[ 9][18:10])
+                 && (tlb_ps4MB[ 9] || s0_vppn[9:0]==tlb_vppn[ 9][9:0])
+                 && ((s0_asid==tlb_asid[ 9]) || tlb_g[ 9]);
+assign match0[10] = (s0_vppn[18:10]==tlb_vppn[10][18:10])
+                 && (tlb_ps4MB[10] || s0_vppn[9:0]==tlb_vppn[10][9:0])
+                 && ((s0_asid==tlb_asid[10]) || tlb_g[10]);
+assign match0[11] = (s0_vppn[18:10]==tlb_vppn[11][18:10])
+                 && (tlb_ps4MB[11] || s0_vppn[9:0]==tlb_vppn[11][9:0])
+                 && ((s0_asid==tlb_asid[11]) || tlb_g[11]);
+assign match0[12] = (s0_vppn[18:10]==tlb_vppn[12][18:10])
+                 && (tlb_ps4MB[12] || s0_vppn[9:0]==tlb_vppn[12][9:0])
+                 && ((s0_asid==tlb_asid[12]) || tlb_g[12]);
+assign match0[13] = (s0_vppn[18:10]==tlb_vppn[13][18:10])
+                 && (tlb_ps4MB[13] || s0_vppn[9:0]==tlb_vppn[13][9:0])
+                 && ((s0_asid==tlb_asid[13]) || tlb_g[13]);
+assign match0[14] = (s0_vppn[18:10]==tlb_vppn[14][18:10])
+                 && (tlb_ps4MB[14] || s0_vppn[9:0]==tlb_vppn[14][9:0])
+                 && ((s0_asid==tlb_asid[14]) || tlb_g[14]);
+assign match0[15] = (s0_vppn[18:10]==tlb_vppn[15][18:10])
+                 && (tlb_ps4MB[15] || s0_vppn[9:0]==tlb_vppn[15][9:0])
+                 && ((s0_asid==tlb_asid[15]) || tlb_g[15]); */
+				 
+assign match0[ 0] = (s0_vppn[18:9]==tlb_vppn[ 0][18:9])
                  && (tlb_ps2MB[ 0] || s0_vppn[8:0]==tlb_vppn[ 0][8:0])
                  && ((s0_asid==tlb_asid[ 0]) || tlb_g[ 0])
                  && tlb_e[0];
@@ -164,7 +205,56 @@ assign match0[14] = (s0_vppn[18:9]==tlb_vppn[14][18:9])
 assign match0[15] = (s0_vppn[18:9]==tlb_vppn[15][18:9])
                  && (tlb_ps2MB[15] || s0_vppn[8:0]==tlb_vppn[15][8:0])
                  && ((s0_asid==tlb_asid[15]) || tlb_g[15])
-                 && tlb_e[15]; */
+                 && tlb_e[15];
+
+/* assign match1[ 0] = (s1_vppn[18:10]==tlb_vppn[ 0][18:10])
+                 && (tlb_ps4MB[ 0] || s1_vppn[9:0]==tlb_vppn[ 0][9:0])
+                 && ((s1_asid==tlb_asid[ 0]) || tlb_g[ 0]);
+assign match1[ 1] = (s1_vppn[18:10]==tlb_vppn[ 1][18:10])
+                 && (tlb_ps4MB[ 1] || s1_vppn[9:0]==tlb_vppn[ 1][9:0])
+                 && ((s1_asid==tlb_asid[ 1]) || tlb_g[ 1]);
+assign match1[ 2] = (s1_vppn[18:10]==tlb_vppn[ 2][18:10])
+                 && (tlb_ps4MB[ 2] || s1_vppn[9:0]==tlb_vppn[ 2][9:0])
+                 && ((s1_asid==tlb_asid[ 2]) || tlb_g[ 2]);
+assign match1[ 3] = (s1_vppn[18:10]==tlb_vppn[ 3][18:10])
+                 && (tlb_ps4MB[ 3] || s1_vppn[9:0]==tlb_vppn[ 3][9:0])
+                 && ((s1_asid==tlb_asid[ 3]) || tlb_g[ 3]);
+assign match1[ 4] = (s1_vppn[18:10]==tlb_vppn[ 4][18:10])
+                 && (tlb_ps4MB[ 4] || s1_vppn[9:0]==tlb_vppn[ 4][9:0])
+                 && ((s1_asid==tlb_asid[ 4]) || tlb_g[ 4]);
+assign match1[ 5] = (s1_vppn[18:10]==tlb_vppn[ 5][18:10])
+                 && (tlb_ps4MB[ 5] || s1_vppn[9:0]==tlb_vppn[ 5][9:0])
+                 && ((s1_asid==tlb_asid[ 5]) || tlb_g[ 5]);
+assign match1[ 6] = (s1_vppn[18:10]==tlb_vppn[ 6][18:10])
+                 && (tlb_ps4MB[ 6] || s1_vppn[9:0]==tlb_vppn[ 6][9:0])
+                 && ((s1_asid==tlb_asid[ 6]) || tlb_g[ 6]);
+assign match1[ 7] = (s1_vppn[18:10]==tlb_vppn[ 7][18:10])
+                 && (tlb_ps4MB[ 7] || s1_vppn[9:0]==tlb_vppn[ 7][9:0])
+                 && ((s1_asid==tlb_asid[ 7]) || tlb_g[ 7]);
+assign match1[ 8] = (s1_vppn[18:10]==tlb_vppn[ 8][18:10])
+                 && (tlb_ps4MB[ 8] || s1_vppn[9:0]==tlb_vppn[ 8][9:0])
+                 && ((s1_asid==tlb_asid[ 8]) || tlb_g[ 8]);
+assign match1[ 9] = (s1_vppn[18:10]==tlb_vppn[ 9][18:10])
+                 && (tlb_ps4MB[ 9] || s1_vppn[9:0]==tlb_vppn[ 9][9:0])
+                 && ((s1_asid==tlb_asid[ 9]) || tlb_g[ 9]);
+assign match1[10] = (s1_vppn[18:10]==tlb_vppn[10][18:10])
+                 && (tlb_ps4MB[10] || s1_vppn[9:0]==tlb_vppn[10][9:0])
+                 && ((s1_asid==tlb_asid[10]) || tlb_g[10]);
+assign match1[11] = (s1_vppn[18:10]==tlb_vppn[11][18:10])
+                 && (tlb_ps4MB[11] || s1_vppn[9:0]==tlb_vppn[11][9:0])
+                 && ((s1_asid==tlb_asid[11]) || tlb_g[11]);
+assign match1[12] = (s1_vppn[18:10]==tlb_vppn[12][18:10])
+                 && (tlb_ps4MB[12] || s1_vppn[9:0]==tlb_vppn[12][9:0])
+                 && ((s1_asid==tlb_asid[12]) || tlb_g[12]);
+assign match1[13] = (s1_vppn[18:10]==tlb_vppn[13][18:10])
+                 && (tlb_ps4MB[13] || s1_vppn[9:0]==tlb_vppn[13][9:0])
+                 && ((s1_asid==tlb_asid[13]) || tlb_g[13]);
+assign match1[14] = (s1_vppn[18:10]==tlb_vppn[14][18:10])
+                 && (tlb_ps4MB[14] || s1_vppn[9:0]==tlb_vppn[14][9:0])
+                 && ((s1_asid==tlb_asid[14]) || tlb_g[14]);
+assign match1[15] = (s1_vppn[18:10]==tlb_vppn[15][18:10])
+                 && (tlb_ps4MB[15] || s1_vppn[9:0]==tlb_vppn[15][9:0])
+                 && ((s1_asid==tlb_asid[15]) || tlb_g[15]); */
 				 
 assign match1[ 0] = (s1_vppn[18:9]==tlb_vppn[ 0][18:9])
                  && (tlb_ps2MB[ 0] || s1_vppn[8:0]==tlb_vppn[ 0][8:0])
@@ -231,7 +321,10 @@ assign match1[15] = (s1_vppn[18:9]==tlb_vppn[15][18:9])
                  && ((s1_asid==tlb_asid[15]) || tlb_g[15])
                  && tlb_e[15];
 
-assign s0_found     = | match0;
+assign s0_found     = match0[ 0] | match0[ 1] | match0[ 2] | match0[ 3]
+                    | match0[ 4] | match0[ 5] | match0[ 6] | match0[ 7]
+                    | match0[ 8] | match0[ 9] | match0[10] | match0[11]
+                    | match0[12] | match0[13] | match0[14] | match0[15];
 assign s0_index     = s0_found ? (match0[ 0] ? 4'h0 : (match0[ 1] ? 4'h1 : (
                                   match0[ 2] ? 4'h2 : (match0[ 3] ? 4'h3 : (
                                   match0[ 4] ? 4'h4 : (match0[ 5] ? 4'h5 : (
@@ -242,12 +335,17 @@ assign s0_index     = s0_found ? (match0[ 0] ? 4'h0 : (match0[ 1] ? 4'h1 : (
                                   match0[14] ? 4'he : (match0[15] ? 4'hf : 4'hx
                                   )))))))))))))))) : 4'hx;
 wire even_or_odd0 = tlb_ps2MB[s0_index] ? s0_vppn[8] : s0_va_bit12;
-assign s0_ppn		= s0_found ? (even_or_odd0 ? tlb_ppn1[s0_index] : tlb_ppn0[s0_index]) : 20'hxxx;
-assign s0_ps        = tlb_ps[s0_index]  ;
-assign s0_plv       = even_or_odd0 ? tlb_plv1[s0_index] : tlb_plv0[s0_index];
-assign s0_mat       = even_or_odd0 ? tlb_mat1[s0_index] : tlb_mat0[s0_index];
-assign s0_d         = even_or_odd0 ? tlb_d1[s0_index] : tlb_d0[s0_index];
-assign s0_v         = even_or_odd0 ? tlb_v1[s0_index] : tlb_v0[s0_index];
+assign s0_ppn		= s0_found ? (even_or_odd0 ? tlb_ppn1[s0_index] : tlb_ppn0[s0_index])/*(
+								  tlb_ps2MB[s0_index] ? 
+													    (s0_vppn[8] ? tlb_ppn1[s0_index] : tlb_ppn0[s0_index]) :
+														(s0_va_bit12 ? tlb_ppn1[s0_index] : tlb_ppn0[s0_index])
+								 )*/:
+								 20'hxxx;
+assign s0_ps        =   tlb_ps[s0_index]  ;
+assign s0_plv       =   even_or_odd0 ? tlb_plv1[s0_index] : tlb_plv0[s0_index];
+assign s0_mat       =   even_or_odd0 ? tlb_mat1[s0_index] : tlb_mat0[s0_index];
+assign s0_d         =   even_or_odd0 ? tlb_d1[s0_index] : tlb_d0[s0_index];
+assign s0_v         =   even_or_odd0 ? tlb_v1[s0_index] : tlb_v0[s0_index];
 
 assign s1_found     = match1[ 0] | match1[ 1] | match1[ 2] | match1[ 3]
                     | match1[ 4] | match1[ 5] | match1[ 6] | match1[ 7]
@@ -263,8 +361,13 @@ assign s1_index     = s1_found ? (match1[ 0] ? 4'h0 : (match1[ 1] ? 4'h1 : (
                                   match1[14] ? 4'he : (match1[15] ? 4'hf : 4'hx
                                   )))))))))))))))) : 4'hx;
 wire even_or_odd1 = tlb_ps2MB[s1_index] ? s1_vppn[8] : s1_va_bit12;
-assign s1_ppn		= s1_found ? (even_or_odd1 ? tlb_ppn1[s1_index] : tlb_ppn0[s1_index]) : 20'hxxx;
-assign s1_ps        =   tlb_ps[s1_index];
+assign s1_ppn		= s1_found ? (even_or_odd1 ? tlb_ppn1[s1_index] : tlb_ppn0[s1_index])/*(
+								  tlb_ps2MB[s1_index] ? 
+													    (s1_vppn[8] ? tlb_ppn1[s1_index] : tlb_ppn0[s1_index]) :
+														(s1_va_bit12 ? tlb_ppn1[s1_index] : tlb_ppn0[s1_index])
+								 )*/:
+								 20'hxxx;
+assign s1_ps        =   tlb_ps[s1_index]  ;
 assign s1_plv       =   even_or_odd1 ? tlb_plv1[s1_index] : tlb_plv0[s1_index];
 assign s1_mat       =   even_or_odd1 ? tlb_mat1[s1_index] : tlb_mat0[s1_index];
 assign s1_d         =   even_or_odd1 ? tlb_d1[s1_index] : tlb_d0[s1_index];

@@ -2,7 +2,6 @@
 `include "mycpu.h"
 
 module mycpu_top(
-    input  wire [7:0] ext_int,
     input  wire       aclk,
     input  wire       aresetn,
 	// axi interface
@@ -437,7 +436,8 @@ assign icache_wr_rdy = 1'b1; //icache不会写内存，置为1没有副作用
 assign icache_uncached = is_direct_ad && (datf != 2'b01) 
                       || (is_map_ad && (s0_hit ? s0_hit_d_mat : s0_mat) != 2'b1);
 assign dcache_uncached = is_direct_ad && (datm != 2'b01) 
-                      || (is_map_ad && (s1_hit ? s1_hit_d_mat : s1_mat) != 2'b1);
+                      || (is_map_ad && (s1_hit ? s1_hit_d_mat : s1_mat) != 2'b1)
+                      || p_data_addr[31:16] == 16'hbfaf; //这一行应该可以注释掉了
 
 //dcache
 wire         dcache_req      ;

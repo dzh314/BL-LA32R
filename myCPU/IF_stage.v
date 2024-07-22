@@ -31,6 +31,8 @@ module if_stage(
 );
 
 wire        fs_ready_go;
+wire        fs_allowin;
+wire        ps_to_fs_valid;
 wire        br_taken;
 reg         wrong_data_ok; //已经发送了请求，还未收到data_ok，发生ws_ex
 wire        next_data_ok_is_wrong;
@@ -42,6 +44,7 @@ reg [`PS_TO_FS_BUS_WD -1:0] ps_to_fs_bus_r;
 reg ex_ertn_wrong_r;
 
 wire [31:0] fs_inst;
+wire [31:0] fs_pc;
 reg  [31:0] inst_r;
 reg         inst_r_valid;
 
@@ -51,6 +54,8 @@ assign {ws_ertn, ws_ex} = ws_to_fs_bus;
 wire fs_ex;
 wire [5:0] fs_ecode;
 wire s0_refill_ex, s0_ex;
+
+wire fs_is_icacop;
 
 assign {s0_ex,
 		s0_refill_ex,

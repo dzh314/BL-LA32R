@@ -71,11 +71,11 @@ assign {rf_we   ,  //37:37
 
 wire        br_taken;
 wire [31:0] br_target;
+wire        br_stall;
 
 wire [18:0] alu_op;
 wire        src1_is_pc;
-wire        src2_is_imm;/* 
-wire        res_from_mem; */
+wire        src2_is_imm;
 wire        dst_is_r1;
 wire        src_reg_is_rd;
 wire        gr_we;
@@ -274,7 +274,7 @@ assign ld_w_stall = es_is_ld && (r1_from_es || r2_from_es);
 wire tlb_stall;
 assign tlb_stall = es_tlb_stall || ms_tlb_stall || ws_tlb_stall;
 
-assign ds_ready_go = ws_ex || ws_is_ertn || !(ld_w_stall || csr_stall || rdtime_stall || tlb_stall);
+assign ds_ready_go = ws_ex || ws_is_ertn || !(ld_w_stall || csr_stall || rdtime_stall || tlb_stall || br_stall);
 assign ds_allowin     = !ds_valid || ds_ready_go && es_allowin;
 assign ds_to_es_valid = ds_valid && ds_ready_go;
 always @(posedge clk) begin
@@ -415,12 +415,6 @@ assign imm = {32{src2_is_4}} & 32'h4
 		   | {32{need_si12}} & {{20{i12[11]}}, i12[11:0]}
 		   | {32{need_ui12}} & {20'b0, i12}
 		   | {32{need_ui5}}  & {27'b0, rk};
-/* assign imm = src2_is_4 ? 32'h4                      :
-             need_si20 ? {i20[19:0], 12'b0}         :
-             need_si12 ? {{20{i12[11]}}, i12[11:0]} :
-			 need_ui12 ? {20'b0, i12}               :
-		   /* need_ui5 {27'b0, rk}                ; */
-  
 
 assign br_offs = need_si26 ? {{ 4{i26[25]}}, i26[25:0], 2'b0} :
                              {{14{i16[15]}}, i16[15:0], 2'b0} ;
@@ -454,7 +448,6 @@ assign src2_is_imm   = inst_slli_w   |
 					   inst_st_h     |
 					   inst_cacop    ;
 
-/* assign res_from_mem  = inst_ld_w | inst_ld_b | inst_ld_h | inst_ld_bu | inst_ld_hu; */
 assign dst_is_r1     = inst_bl;
 assign gr_we         = ~inst_st_w & ~inst_beq & ~inst_bne & ~inst_b & ~inst_blt & ~inst_bge & ~inst_bltu & ~inst_bgeu 
 					 & ~inst_st_b & ~inst_st_h & ~inst_tlbsrch & ~inst_tlbrd & ~inst_tlbwr & ~inst_tlbfill & ~inst_invtlb & ~inst_cacop;
@@ -509,9 +502,9 @@ assign rkd_value= r2_from_es ? es_data :
 				  r2_from_ms ? ms_data : 
 				  r2_from_ws ? ws_data : rf_rdata2;
 
-assign rj_eq_rd = (rj_value == rkd_value);
-assign rj_lt_rd = $signed(rj_value) < $signed(rkd_value);
-assign rj_lt_rd_u = rj_value < rkd_value;
+assign rj_eq_rd = (rf_rdata1 == rf_rdata2);
+assign rj_lt_rd = $signed(rf_rdata1) < $signed(rf_rdata2);
+assign rj_lt_rd_u = rf_rdata1 < rf_rdata2;
 assign br_taken = (   inst_beq  &&  rj_eq_rd
                    || inst_bne  && !rj_eq_rd
 				   || inst_blt  &&  rj_lt_rd
@@ -521,9 +514,10 @@ assign br_taken = (   inst_beq  &&  rj_eq_rd
                    || inst_jirl
                    || inst_bl
                    || inst_b
-                  ) && ds_valid && !(ld_w_stall || csr_stall || rdtime_stall);
+                  ) && ds_valid && !(ld_w_stall || csr_stall || rdtime_stall) && !br_stall;
 assign br_target = (inst_beq || inst_bne || inst_bl || inst_b || inst_blt || inst_bge || inst_bltu || inst_bgeu) ? (ds_pc + br_offs) :
-                                                   /*inst_jirl*/ (rj_value + jirl_offs);
+                                                   /*inst_jirl*/ (rf_rdata1 + jirl_offs);
+assign br_stall = (inst_beq || inst_bne || inst_blt || inst_bge || inst_bltu || inst_bgeu) && (r1_from_es || r1_from_ms || r1_from_ws || r2_from_es || r2_from_ms || r2_from_ws);
 assign ds_to_fs_bus = br_taken;
 
 assign ds_refetch = (inst_tlbwr || inst_tlbfill || ((inst_csrwr || inst_csrxchg) && ((csr == 5'h0) || (csr == 5'h18)))) && ds_valid;
