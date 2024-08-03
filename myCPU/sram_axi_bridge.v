@@ -118,7 +118,7 @@ assign dcache_rd_rdy    = arready && read_data; //读请求已经被接收
 assign dcache_ret_valid = rid[0] & rvalid;
 assign dcache_ret_last  = rid[0] & rlast;
 assign dcache_ret_data  = rdata;
-assign dcache_wr_rdy    = (words_to_write[2:1] == 2'b0) && !(uncached_not_finish && dcache_wr_uncached) || bvalid; //只剩一个字或已经写完，以及uncached阻塞
+assign dcache_wr_rdy    = (words_to_write[2:1] == 2'b0) && !(uncached_not_finish/*  && dcache_wr_uncached */) || bvalid; //只剩一个字或已经写完，以及uncached阻塞
 
 assign awhs = awvalid && awready;
 assign whs  =  wvalid &&  wready;
@@ -151,7 +151,7 @@ assign awprot = 3'b0;
 assign awvalid = write_data && !awhs_r;
 
 assign wid = 4'b1;
-assign wdata = wr_uncached ? dcache_wr_data_r[3] : dcache_wr_data_r[words_to_write-1];
+assign wdata = wr_uncached ? dcache_wr_data_r[3] : dcache_wr_data_r[words_to_write-3'b001];
 assign wstrb = wr_wstrb;
 assign wlast = wr_uncached || uncached_not_finish || (words_to_write == 3'b001);
 assign wvalid = (write_data || has_unsolved_write) && (words_to_write != 3'b000);

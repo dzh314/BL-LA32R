@@ -60,6 +60,7 @@ wire cache_hit; //当uncached和cacop时一定miss
 wire cache_miss;
 reg is_idle, is_lookup, is_miss, is_replace, is_refill;
 reg wbf_is_idle,wbf_is_write;
+reg replace_first;
 wire hit_write;
 reg wr_req_r;
 
@@ -100,15 +101,16 @@ reg [         127:0] miss_data    ;
 reg [           1:0] miss_ret_nums;
 reg                  miss_way     ;
 reg                  miss_v       ;
-reg                  miss_d       ;
+wire                 miss_d       ;
 reg                  miss_true_hit;
+reg [           7:0] miss_d_addr  ;
 
 assign req = valid;
 
 //cache ??
 //tag_v 在REFILL状 ? 时，在ret_last == 1时更改tag_v
 wire [7:0] tag_v_addr = // req_cacop_req                              ? req_index : ///////////////////这句应该可以注释掉
-                        (is_lookup && (cache_miss|| req_uncached)) ? req_index : 
+                        (is_lookup && (cache_miss || req_uncached)) ? req_index : 
                         is_refill                                  ? req_index : 
                         index;
 wire [20:0] tag_v_wdata = (req_cacop_op0 || req_cacop_op2 || req_uncached) ? 21'b0 : {req_tag, 1'b1}; //这里手册上说的是将tag置为全0，我这里把valid也同时置0了，不然还要先读再存，要加通路
@@ -116,22 +118,20 @@ tag_v_ram tag_v_ram0(
     .addra(tag_v_addr                                      ),
     .clka (clk                                             ),
     .dina (tag_v_wdata                                     ),
-    .douta({way0_tag,way0_v}                               ),/* 
-    .ena  (1                                               ), */
+    .douta({way0_tag,way0_v}                               ),
     .wea  (is_refill & ret_last & ~miss_way & ~req_uncached | ((req_cacop_op0 | req_cacop_op1) & ~req_offset[0] | (req_cacop_op2 | req_uncached) & way0_hit) & is_lookup)
 );
 tag_v_ram tag_v_ram1(
     .addra(tag_v_addr                                     ),
     .clka (clk                                            ),
     .dina (tag_v_wdata                                    ),
-    .douta({way1_tag,way1_v}                              ),/* 
-    .ena  (1                                              ), */
+    .douta({way1_tag,way1_v}                              ),
     .wea  (is_refill & ret_last &  miss_way & ~req_uncached | ((req_cacop_op0 | req_cacop_op1) &  req_offset[0] | (req_cacop_op2 | req_uncached) & way1_hit) & is_lookup)
 );
 //d
 reg [255:0] d0_regfile;
 reg [255:0] d1_regfile;
-wire [7:0] d_addr = (is_lookup && cache_miss) ? req_index : 
+wire [7:0] d_addr =/*  (is_lookup && cache_miss) ? req_index :  */
                     is_refill                 ? req_index : 
                     wbf_index;
 always @(posedge clk) begin
@@ -173,8 +173,7 @@ data_bank_ram data_bank_ram00(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way0_data0),/* 
-    .ena  (1         ), */
+    .douta(way0_data0),
     .wea  (we00      )
 );
 
@@ -183,8 +182,7 @@ data_bank_ram data_bank_ram01(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way0_data1),/* 
-    .ena  (1         ), */
+    .douta(way0_data1),
     .wea  (we01      )
 );
 
@@ -193,8 +191,7 @@ data_bank_ram data_bank_ram02(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way0_data2),/* 
-    .ena  (1         ), */
+    .douta(way0_data2),
     .wea  (we02      )
 );
 
@@ -203,8 +200,7 @@ data_bank_ram data_bank_ram03(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way0_data3),/* 
-    .ena  (1         ), */
+    .douta(way0_data3),
     .wea  (we03      )
 );
 
@@ -215,8 +211,7 @@ data_bank_ram data_bank_ram10(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way1_data0),/* 
-    .ena  (1         ), */
+    .douta(way1_data0),
     .wea  (we10      )
 );
 
@@ -225,8 +220,7 @@ data_bank_ram data_bank_ram11(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way1_data1),/* 
-    .ena  (1         ), */
+    .douta(way1_data1),
     .wea  (we11      )
 );
 
@@ -235,8 +229,7 @@ data_bank_ram data_bank_ram12(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way1_data2),/* 
-    .ena  (1         ), */
+    .douta(way1_data2),
     .wea  (we12      )
 );
 
@@ -245,8 +238,7 @@ data_bank_ram data_bank_ram13(
     .addra(data_addr ),
     .clka (clk       ),
     .dina (data_wdata),
-    .douta(way1_data3),/* 
-    .ena  (1         ), */
+    .douta(way1_data3),
     .wea  (we13      )
 );
 
@@ -254,11 +246,16 @@ wire [127:0] way1_data = {way1_data3,way1_data2,way1_data1,way1_data0};
 
 assign stall = !op && ((req_op && cache_hit && (index == req_index) && (req_offset == offset))
                      || wbf_is_write);/* (wbf_is_write && (wbf_bank_num == offset[3:2]))); */
+//!stall = op || !((req_op && cache_hit && (index == req_index) && (req_offset == offset)) || wbf_is_write)
+//op || !stall = !stall = op || !((req_op && cache_hit && (index == req_index) && (req_offset == offset)) || wbf_is_write)
+/* !((req_op && cache_hit && (index == req_index) && (req_offset == offset)) || wbf_is_write) = !() && !wbf_is_write
+op || !()        &&        op || !wbf_is_write */
 
 //tag compare
-assign way0_hit = way0_v && (way0_tag == req_tag);
-assign way1_hit = way1_v && (way1_tag == req_tag);
-assign cache_hit = (way0_hit || way1_hit) && is_lookup && !req_cacop_req && !req_uncached; //只要uncached或者req_caacop_req就一定miss
+assign way0_hit = way0_v && (way0_tag == req_tag) && is_lookup;
+assign way1_hit = way1_v && (way1_tag == req_tag) && is_lookup; 
+
+assign cache_hit = (way0_hit || way1_hit) && is_lookup && !req_cacop_req && !req_uncached; //只要uncached或者req_caacop_req就一定miss  //3.323
 assign cache_miss = ~cache_hit;
 assign true_hit = way0_hit || way1_hit;
 
@@ -273,7 +270,10 @@ assign way1_load_word = way1_data[req_offset[3:2]*32 +: 32];
 assign rdata = {32{way0_hit }} & way0_load_word
              | {32{way1_hit }} & way1_load_word
              | {32{is_refill}} & ret_data;
-assign addr_ok = (is_idle || cache_hit && (op || !stall)) && !(!op && wbf_is_write); ///////////////////////////////////////////////////////////////////////第二种阻塞，我把wbf_is_write拓宽了，因为data_bank_ram前一拍传地址，后一拍才能读到数据
+/* assign addr_ok = (is_idle || cache_hit && (op || !stall)) && !wbf_is_write; */ ////////////////////第二种阻塞，我把wbf_is_write拓宽了，因为data_bank_ram前一拍传地址，后一拍才能读到数据
+/* wire addr_ok_h = cache_hit && !wbf_is_write && (op || !((index == req_index) && (req_offset == offset))); */
+//方式1 
+assign addr_ok = is_idle && !wbf_is_write || cache_hit && !wbf_is_write && (op || !((index == req_index) && (req_offset == offset)));
 assign data_ok = cache_hit && !req_uncached 
               || is_lookup && req_op 
               || is_refill && ret_valid && !req_op && (req_uncached || (miss_ret_nums == req_offset[3:2]));
@@ -285,11 +285,13 @@ assign wr_req = wr_req_r;
 assign wr_type = req_uncached ? (req_wstrb == 4'b1111 ? 3'b010 : req_wstrb == 4'b0011 ? 3'b001 : 3'b000) : 3'b100; //目前是这样的
 assign wr_addr = req_uncached ? {req_tag, req_index, req_offset} : {miss_tag, req_index, 4'b0};
 assign wr_wstrb = req_uncached ? req_wstrb : 4'b1111; //我们目前wr_type = 3'b1000时，该信号无 ??
-assign wr_data = req_uncached ? {96'b0, req_wdata} : miss_data;
+assign wr_data = req_uncached ? {96'b0, req_wdata} : 
+                 replace_first ? replace_data : miss_data;
 
 always @(posedge clk) begin
     if (is_miss && wr_rdy) begin
-        wr_req_r <= miss_v & miss_d & (!req_cacop_op2 | miss_true_hit) | req_uncached & req_op; //有效且脏才需要写
+/*         wr_req_r <= miss_v & miss_d & (!req_cacop_op2 | miss_true_hit) | req_uncached & req_op; //有效且脏才需要写 */
+        wr_req_r <= req_uncached ? req_op : miss_v & miss_d & (!req_cacop_op2 | miss_true_hit);
     end
     else if (wr_rdy) begin
         wr_req_r <= 1'b0;
@@ -330,17 +332,22 @@ always @(posedge clk) begin
         miss_tag          <= replace_way ? way1_tag : way0_tag;
         miss_way          <= replace_way;
         miss_v            <= replace_way ? way1_v : way0_v;
-        miss_d            <= replace_way ? d1_regfile[d_addr] : d0_regfile[d_addr];
+        /* miss_d            <= replace_way ? d1_regfile[d_addr] : d0_regfile[d_addr]; */
         miss_true_hit     <= true_hit;
+        miss_d_addr       <= req_index;
     end
-    if (is_miss) begin //分开写是因为，可能上一次写刚从LOOKUP离开进入wbf_is_write，换言之现在是第二个写的LOOKUP（未命中）和上一次的wbf_is_write，因为wbf_is_write状态发写数据请求，此时读出来的replace_data还没有更新
+/*     if (is_miss) begin //分开写是因为，可能上一次写刚从LOOKUP离开进入wbf_is_write，换言之现在是第二个写的LOOKUP（未命中）和上一次的wbf_is_write，因为wbf_is_write状态发写数据请求，此时读出来的replace_data还没有更新
+        miss_data <= replace_data;
+    end */
+    if (replace_first) begin
         miss_data <= replace_data;
     end
 end
+assign miss_d = miss_way ? d1_regfile[miss_d_addr] : d0_regfile[miss_d_addr];
 
 //write buffer
 wire [31:0] wbf_true_data;
-assign wbf_true_data = mask & req_wdata | ~mask & rdata;
+assign wbf_true_data = mask & req_wdata | ~mask & (wbf_is_write && (wbf_index == req_index) && (wbf_bank_num == req_bank_num) ? wbf_wdata : rdata);
 always @(posedge clk) begin
     if(is_lookup && hit_write) begin
         wbf_way      <= way1_hit     ;
@@ -351,7 +358,7 @@ always @(posedge clk) begin
     end
 end
 
-assign hit_write = cache_hit & op;
+assign hit_write = cache_hit & req_op;
 
 //write buffer状 ? 机
 always @(posedge clk) begin
@@ -378,7 +385,7 @@ always @(posedge clk) begin
         is_replace  <= 1'b0;
         is_refill   <= 1'b0;
     end
-    else if(is_idle && (req || cacop_req) && !stall) begin
+    else if(is_idle && (req || cacop_req) && !stall && !wbf_is_write) begin
         is_idle     <= 1'b0;
         is_lookup   <= 1'b1;
     end
@@ -402,6 +409,78 @@ always @(posedge clk) begin
         is_refill   <= 1'b0;
         is_idle     <= 1'b1;
     end
+
+    if (reset) begin
+        replace_first <= 1'b0;
+    end
+    else if (is_miss && wr_rdy) begin
+        replace_first <= 1'b1;
+    end
+    else if (is_replace) begin
+        replace_first <= 1'b0;
+    end
 end
 
 endmodule
+
+`ifdef DIFFTEST_EN
+module tag_v_ram
+#( 
+    parameter WIDTH = 21    ,
+    parameter DEPTH = 256
+)
+( 
+    input  [ 7:0]          addra   ,
+    input                  clka    ,
+    input  [20:0]          dina    ,
+    output [20:0]          douta   ,
+    input                  wea 
+);
+
+reg [20:0] mem_reg [255:0];
+reg [20:0] output_buffer;
+
+always @(posedge clka) begin
+        if (wea) begin
+            mem_reg[addra] <= dina;
+            output_buffer <= dina;
+        end
+        else begin
+            output_buffer <= mem_reg[addra];
+        end
+end
+
+assign douta = output_buffer;
+
+endmodule
+
+module data_bank_ram
+#(
+    parameter WIDTH = 32    ,
+    parameter DEPTH = 256
+)
+(
+    input  [ 7:0]          addra   ,
+    input                  clka    ,
+    input  [31:0]          dina    ,
+    output [31:0]          douta   ,
+    input                  wea      
+);
+
+reg [31:0] mem_reg [255:0];
+reg [31:0] output_buffer;
+
+always @(posedge clka) begin
+        if (wea) begin
+            mem_reg[addra][31: 0] <= dina[31: 0];
+            output_buffer <= dina[31:0]; ///////////////////////////////////
+        end
+        else begin
+            output_buffer <= mem_reg[addra];
+        end
+end
+
+assign douta = output_buffer;
+
+endmodule
+`endif

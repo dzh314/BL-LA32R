@@ -3,14 +3,14 @@
 module pre_if_stage(
     input                          clk           ,
     input                          reset         ,
-    //allwoin
+    //allowin
     input                          fs_allowin    ,
     //brbus
     input  [`BR_BUS_WD       -1:0] br_bus        ,
 	//wrongPC_br
-	output                         wrongPC_br    ,
-	output                         wrong_req_r   ,
-	output                         br_bus_r_valid,
+	output reg                     wrongPC_br    ,
+	output reg                     wrong_req_r   ,
+	output reg                     br_bus_r_valid,
     //to fs
     output                         ps_to_fs_valid,
     output [`PS_TO_FS_BUS_WD -1:0] ps_to_fs_bus  ,
@@ -32,7 +32,8 @@ module pre_if_stage(
 	//cacop
 	input                           fs_is_icacop ,
 	input                           ds_is_icacop ,
-	input                           es_is_icacop
+	input                           es_is_icacop ,
+	input                           rs_is_icacop
 );
 
 wire        ps_ready_go;
@@ -58,10 +59,8 @@ wire         br_taken, br_taken_r;
 wire [31:0] br_target;
 wire [31:0] br_target_r;
 reg [`BR_BUS_WD-1:0] br_bus_r;
-reg br_bus_r_valid;
 assign {br_taken,br_target} = br_bus;
 assign {br_taken_r, br_target_r} = br_bus_r;
-reg wrongPC_br, wrong_req_r;
 reg refetch_r;
 
 reg inst_sram_en_r;
@@ -220,11 +219,11 @@ always @(posedge clk) begin
 	end
 end
 
-assign inst_sram_en    = should_keep ? inst_sram_en_r : (~reset && fs_allowin && !ps_ex && !refetch && !(fs_is_icacop || ds_is_icacop || es_is_icacop));
+assign inst_sram_en    = should_keep ? inst_sram_en_r : (~reset && fs_allowin && !ps_ex && !refetch && !(fs_is_icacop || ds_is_icacop || es_is_icacop || rs_is_icacop));
 assign inst_sram_we    = 4'h0;
 assign inst_sram_addr  = nextpc;
 assign inst_sram_wdata = 32'b0;
 
-assign ps_inst_req = should_keep ? inst_sram_en_r : (~reset && fs_allowin && !adef_ex && !refetch && !(fs_is_icacop || ds_is_icacop || es_is_icacop)); //请求意图，可能会有TLB例外，不是最终的请求信号
+assign ps_inst_req = should_keep ? inst_sram_en_r : (~reset && fs_allowin && !adef_ex && !refetch/*  && !(fs_is_icacop || ds_is_icacop || es_is_icacop || rs_is_icacop) */); //请求意图，可能会有TLB例外，不是最终的请求信号
 
 endmodule

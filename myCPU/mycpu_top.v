@@ -1,7 +1,15 @@
 //LoongArch
 `include "mycpu.h"
 
+//记得改mycpu_top，跑chiplab用core_top
 module mycpu_top(
+    input  wire [7:0] ext_int,
+    //chiplab
+    input wire [7:0] intrpt,
+    input wire break_point,
+    input wire infor_flag,
+    input wire [4:0] reg_num,
+
     input  wire       aclk,
     input  wire       aresetn,
 	// axi interface
@@ -51,14 +59,18 @@ module mycpu_top(
     output wire[ 4:0] debug_wb_rf_wnum ,
     output wire[31:0] debug_wb_rf_wdata
 );
-wire fs_is_icacop, ds_is_icacop, es_is_icacop;
-wire es_is_cacop, es_is_dcacop;
+`ifdef DIFFTEST_EN
+wire [31:0] regs[31:0];
+`endif
+
+wire fs_is_icacop, ds_is_icacop, rs_is_icacop;
+wire rs_is_cacop, rs_is_dcacop;
 wire [4:0] cacop_code;
 wire [1:0] cacop_op;
 wire is_icacop = cacop_code[2:0] == 3'b0;
 wire is_dcacop = cacop_code[2:0] == 3'b1;
 assign cacop_op = cacop_code[4:3];
-assign es_is_dcacop = es_is_cacop && !es_is_icacop;
+assign rs_is_dcacop = rs_is_cacop && !rs_is_icacop;
 
 wire clk, resetn;
 assign clk = aclk;
@@ -67,35 +79,9 @@ assign resetn = aresetn;
 //pre-IF_stage
 wire [31:0] ps_inst_addr;
 wire ps_inst_req;
-//exe_stage
-wire [31:0] es_data_addr;
-wire es_data_req;
-
-/* // inst sram interface
-wire        inst_sram_req    ;
-wire        inst_sram_wr     ;
-wire [ 1:0] inst_sram_size   ;
-wire [ 3:0] inst_sram_wstrb  ;
-wire [31:0] inst_sram_addr   ;
-wire [31:0] inst_sram_wdata  ;
-wire        inst_sram_addr_ok;
-wire        inst_sram_data_ok;
-wire [31:0] inst_sram_rdata  ; */
-
-/* // data sram interface
-wire        data_sram_req    ;
-wire        data_sram_wr     ;
-wire [ 1:0] data_sram_size   ; 
-wire [ 3:0] data_sram_wstrb  ;
-wire [31:0] data_sram_addr   ;
-wire [31:0] data_sram_wdata  ;
-wire        data_sram_addr_ok; 
-wire        data_sram_data_ok;
-wire [31:0] data_sram_rdata  ; */
-
-/* assign inst_sram_wr = |inst_sram_wstrb;
-assign inst_sram_size = 2'b10; */
-/* assign data_sram_wr = |data_sram_wstrb; */
+// pre-MEM_stage
+wire [31:0] rs_data_addr;
+wire rs_data_req;
 
 reg         reset;
 always @(posedge clk) reset <= ~resetn;
@@ -103,23 +89,29 @@ always @(posedge clk) reset <= ~resetn;
 wire         fs_allowin;
 wire         ds_allowin;
 wire         es_allowin;
+wire         rs_allowin;
 wire         ms_allowin;
 wire         ws_allowin;
 wire         ps_to_fs_valid;
 wire         fs_to_ds_valid;
 wire         ds_to_es_valid;
-wire         es_to_ms_valid;
+wire         es_to_rs_valid;
+wire         rs_to_ms_valid;
 wire         ms_to_ws_valid;
 wire [`PS_TO_FS_BUS_WD -1:0] ps_to_fs_bus;
 wire [`FS_TO_DS_BUS_WD -1:0] fs_to_ds_bus;
 wire [`DS_TO_ES_BUS_WD -1:0] ds_to_es_bus;
-wire [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus;
+wire [`ES_TO_RS_BUS_WD -1:0] es_to_rs_bus;
+wire [`RS_TO_MS_BUS_WD -1:0] rs_to_ms_bus;
 wire [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus;
 wire [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus;
 wire [`BR_BUS_WD       -1:0] br_bus;
 
+wire es_br_taken;
+
 // forward
 wire [`ES_TO_DS_BUS_WD - 1:0] es_to_ds_bus;
+wire [`RS_TO_DS_BUS_WD - 1:0] rs_to_ds_bus;
 wire [`MS_TO_DS_BUS_WD - 1:0] ms_to_ds_bus;
 wire [`WS_TO_DS_BUS_WD - 1:0] ws_to_ds_bus;
 
@@ -129,11 +121,13 @@ wire [`WS_TO_TLB_BUS_WD -1:0] ws_to_tlb_bus;
 wire [`TLB_TO_WS_BUS_WD -1:0] tlb_to_ws_bus;
 wire [`TLB_TO_PS_BUS_WD -1:0] tlb_to_ps_bus;
 wire [`TLB_TO_ES_BUS_WD -1:0] tlb_to_es_bus;
+wire [`TLB_TO_RS_BUS_WD -1:0] tlb_to_rs_bus;
 wire [1:0] ws_to_es_bus;
+wire [1:0] ws_to_rs_bus;
 wire [1:0] ws_to_ms_bus;
 wire       ds_to_fs_bus;
 
-wire       ms_to_es_bus;
+wire ms_to_rs_bus;
 
 wire wrongPC_br, wrong_req_r, br_bus_r_valid;
 
@@ -229,12 +223,95 @@ wire [               18:0] invtlb_vppn       ;
 wire [                9:0] invtlb_asid       ;
 wire [                1:0] csr_crmd_plv      ;
 
+`ifdef DIFFTEST_EN
+// from wb_stage
+wire    [31:0]  debug_wb_inst       ;
+wire            ws_valid_diff       ;
+wire            cnt_inst_diff       ;
+wire    [63:0]  timer_64_diff       ;
+wire    [ 7:0]  inst_ld_en_diff     ;
+wire    [31:0]  ld_paddr_diff       ;
+wire    [31:0]  ld_vaddr_diff       ;
+wire    [ 7:0]  inst_st_en_diff     ;
+wire    [31:0]  st_paddr_diff       ;
+wire    [31:0]  st_vaddr_diff       ;
+wire    [31:0]  st_data_diff        ;
+wire            csr_rstat_en_diff   ;
+wire    [31:0]  csr_data_diff       ;
+
+wire inst_valid_diff = ws_valid_diff;
+reg             cmt_valid           ;
+reg             cmt_cnt_inst        ;
+reg     [63:0]  cmt_timer_64        ;
+reg     [ 7:0]  cmt_inst_ld_en      ;
+reg     [31:0]  cmt_ld_paddr        ;
+reg     [31:0]  cmt_ld_vaddr        ;
+reg     [ 7:0]  cmt_inst_st_en      ;
+reg     [31:0]  cmt_st_paddr        ;
+reg     [31:0]  cmt_st_vaddr        ;
+reg     [31:0]  cmt_st_data         ;
+reg             cmt_csr_rstat_en    ;
+reg     [31:0]  cmt_csr_data        ;
+
+reg             cmt_wen             ;
+reg     [ 7:0]  cmt_wdest           ;
+reg     [31:0]  cmt_wdata           ;
+reg     [31:0]  cmt_pc              ;
+reg     [31:0]  cmt_inst            ;
+
+reg             cmt_excp_flush      ;
+reg             cmt_ertn            ;
+reg     [5:0]   cmt_csr_ecode       ;
+reg             cmt_tlbfill_en      ;
+reg     [4:0]   cmt_rand_index      ;
+
+// to difftest debug
+reg             trap                ;
+reg     [ 7:0]  trap_code           ;
+reg     [63:0]  cycleCnt            ;
+reg     [63:0]  instrCnt            ;
+
+// from regfile
+wire    [31:0]  regs[31:0]          ;
+
+// from csr
+wire    [31:0]  csr_crmd_diff_0     ;
+wire    [31:0]  csr_prmd_diff_0     ;
+wire    [31:0]  csr_ectl_diff_0     ;
+wire    [31:0]  csr_estat_diff_0    ;
+wire    [31:0]  csr_era_diff_0      ;
+wire    [31:0]  csr_badv_diff_0     ;
+wire	[31:0]  csr_eentry_diff_0   ;
+wire 	[31:0]  csr_tlbidx_diff_0   ;
+wire 	[31:0]  csr_tlbehi_diff_0   ;
+wire 	[31:0]  csr_tlbelo0_diff_0  ;
+wire 	[31:0]  csr_tlbelo1_diff_0  ;
+wire 	[31:0]  csr_asid_diff_0     ;
+wire 	[31:0]  csr_save0_diff_0    ;
+wire 	[31:0]  csr_save1_diff_0    ;
+wire 	[31:0]  csr_save2_diff_0    ;
+wire 	[31:0]  csr_save3_diff_0    ;
+wire 	[31:0]  csr_tid_diff_0      ;
+wire 	[31:0]  csr_tcfg_diff_0     ;
+wire 	[31:0]  csr_tval_diff_0     ;
+wire 	[31:0]  csr_ticlr_diff_0    ;
+wire 	[31:0]  csr_llbctl_diff_0   ;
+wire 	[31:0]  csr_tlbrentry_diff_0;
+wire 	[31:0]  csr_dmw0_diff_0     ;
+wire 	[31:0]  csr_dmw1_diff_0     ;
+wire 	[31:0]  csr_pgdl_diff_0     ;
+wire 	[31:0]  csr_pgdh_diff_0     ;
+
+wire [31:0] debug0_wb_pc;
+assign debug0_wb_pc = debug_wb_pc;
+`endif
+
 //dmw
 wire [3:0] csr_dmw3_plv, csr_dmw2_plv, csr_dmw1_plv, csr_dmw0_plv;
 wire [1:0] csr_dmw3_mat, csr_dmw2_mat, csr_dmw1_mat, csr_dmw0_mat;
 wire [1:0] s0_hit_d_mat, s1_hit_d_mat;
 wire [2:0] csr_dmw3_pseg, csr_dmw3_vseg, csr_dmw2_pseg, csr_dmw2_vseg, csr_dmw1_pseg, csr_dmw1_vseg, csr_dmw0_pseg, csr_dmw0_vseg;
-wire s0_hit_d0, s0_hit_d1, s0_hit_d2, s0_hit_d3, s1_hit_d0, s1_hit_d1, s1_hit_d2, s1_hit_d3, s0_hit, s1_hit;
+wire s0_hit_d0, s0_hit_d1, s0_hit_d2, s0_hit_d3, s1_hit_d0, s1_hit_d1, s1_hit_d2, s1_hit_d3, s0_hit_d, s1_hit_d;
 wire [2:0] dmw_res0, dmw_res1;
 assign s0_hit_d0 = (ps_inst_addr[31:29] == csr_dmw0_vseg && csr_dmw0_plv[csr_crmd_plv]);
 assign s0_hit_d1 = (ps_inst_addr[31:29] == csr_dmw1_vseg && csr_dmw1_plv[csr_crmd_plv]);
@@ -242,14 +319,14 @@ assign s0_hit_d2 = (ps_inst_addr[31:29] == csr_dmw2_vseg && csr_dmw2_plv[csr_crm
 assign s0_hit_d3 = (ps_inst_addr[31:29] == csr_dmw3_vseg && csr_dmw3_plv[csr_crmd_plv]);
 assign s0_hit_d_mat = ({2{s0_hit_d0}} & csr_dmw0_mat) | ({2{s0_hit_d1}} & csr_dmw1_mat) | ({2{s0_hit_d2}} & csr_dmw2_mat) | ({2{s0_hit_d3}} & csr_dmw3_mat);
 assign dmw_res0 = ({3{s0_hit_d0}} & csr_dmw0_pseg) | ({3{s0_hit_d1}} & csr_dmw1_pseg) | ({3{s0_hit_d2}} & csr_dmw2_pseg) | ({3{s0_hit_d3}} & csr_dmw3_pseg);
-assign s0_hit = s0_hit_d0 | s0_hit_d1 | s0_hit_d2 | s0_hit_d3;
-assign s1_hit_d0 = (es_data_addr[31:29] == csr_dmw0_vseg && csr_dmw0_plv[csr_crmd_plv]);
-assign s1_hit_d1 = (es_data_addr[31:29] == csr_dmw1_vseg && csr_dmw1_plv[csr_crmd_plv]);
-assign s1_hit_d2 = (es_data_addr[31:29] == csr_dmw2_vseg && csr_dmw2_plv[csr_crmd_plv]);
-assign s1_hit_d3 = (es_data_addr[31:29] == csr_dmw3_vseg && csr_dmw3_plv[csr_crmd_plv]);
+assign s0_hit_d = s0_hit_d0 | s0_hit_d1 | s0_hit_d2 | s0_hit_d3;
+assign s1_hit_d0 = (rs_data_addr[31:29] == csr_dmw0_vseg && csr_dmw0_plv[csr_crmd_plv]);
+assign s1_hit_d1 = (rs_data_addr[31:29] == csr_dmw1_vseg && csr_dmw1_plv[csr_crmd_plv]);
+assign s1_hit_d2 = (rs_data_addr[31:29] == csr_dmw2_vseg && csr_dmw2_plv[csr_crmd_plv]);
+assign s1_hit_d3 = (rs_data_addr[31:29] == csr_dmw3_vseg && csr_dmw3_plv[csr_crmd_plv]);
 assign s1_hit_d_mat = ({2{s1_hit_d0}} & csr_dmw0_mat) | ({2{s1_hit_d1}} & csr_dmw1_mat) | ({2{s1_hit_d2}} & csr_dmw2_mat) | ({2{s1_hit_d3}} & csr_dmw3_mat);
 assign dmw_res1 = ({3{s1_hit_d0}} & csr_dmw0_pseg) | ({3{s1_hit_d1}} & csr_dmw1_pseg) | ({3{s1_hit_d2}} & csr_dmw2_pseg) | ({3{s1_hit_d3}} & csr_dmw3_pseg);
-assign s1_hit = s1_hit_d0 | s1_hit_d1 | s1_hit_d2 | s1_hit_d3;
+assign s1_hit_d = s1_hit_d0 | s1_hit_d1 | s1_hit_d2 | s1_hit_d3;
 
 assign {csr_dmw3_plv      ,
         csr_dmw3_mat      ,
@@ -295,65 +372,14 @@ assign {csr_dmw3_plv      ,
 		csr_asid_asid     ,
 		ws_is_tlbsrch     ,
 		csr_tlbehi_vppn} = ws_to_tlb_bus;
-// search port 0 (for fetch)
-assign s0_vppn = ps_inst_addr[31:13];
-assign s0_va_bit12 = ps_inst_addr[12];
-assign s0_asid = csr_asid_asid;
-// search port 1 (for load/store)
-assign s1_vppn = ws_is_tlbsrch ? csr_tlbehi_vppn :
-				 ws_is_invtlb  ? invtlb_vppn     :
-				 es_data_addr[31:13];
-assign s1_va_bit12 = es_data_addr[12];
-assign s1_asid = ws_is_tlbsrch ? csr_asid_asid : 
-				 ws_is_invtlb  ? invtlb_asid   :
-				 csr_asid_asid;
-// invtlb opcode
-assign invtlb_valid = ws_is_invtlb;
-// write port
-assign we = ws_is_tlbwr | ws_is_tlbfill;
-assign w_index = csr_tlbidx_index;
-assign w_e = csr_tlbrera_istlbr ? 1'b1 : ~csr_tlbidx_ne;
-assign w_vppn = csr_tlbehi_vppn;
-assign w_ps = csr_tlbidx_ps;
-assign w_asid = csr_asid_asid;
-assign w_g = csr_tlbelo0_g & csr_tlbelo1_g;
-assign w_ppn0 = csr_tlbelo0_ppn;
-assign w_plv0 = csr_tlbelo0_plv;
-assign w_mat0 = csr_tlbelo0_mat;
-assign w_d0 = csr_tlbelo0_d;
-assign w_v0 = csr_tlbelo0_v;
-assign w_ppn1 = csr_tlbelo1_ppn;
-assign w_plv1 = csr_tlbelo1_plv;
-assign w_mat1 = csr_tlbelo1_mat;
-assign w_d1 = csr_tlbelo1_d;
-assign w_v1 = csr_tlbelo1_v;
-// read port
-assign r_index = csr_tlbidx_index;
 
-assign tlb_to_ws_bus = {r_asid, //93:84
-						r_ps, //83:78
-						r_g, //77
-						r_ppn0, //76:57
-						r_plv0, //56:55
-						r_mat0, //54:53
-						r_d0, //52
-						r_v0, //51
-						r_ppn1, //50:31
-						r_plv1, //30:29
-						r_mat1, //28:27
-						r_d1, //26
-						r_v1, //25
-						r_e, //24
-						s1_index, //23:20
-						s1_found, //19
-						r_vppn // 18:0
-					   };
+assign tlb_to_ws_bus = `TLB_TO_WS_BUS_WD'b0;
 					   
 //refetch
 wire refetch;
-wire ds_refetch, es_refetch, ms_refetch, ws_refetch;
+wire ds_refetch, es_refetch, rs_refetch, ms_refetch, ws_refetch;
 reg  ds_refetch_r;
-assign refetch = ds_refetch || es_refetch || ms_refetch || ws_refetch;
+assign refetch = ds_refetch || es_refetch || rs_refetch || ms_refetch || ws_refetch;
 wire [31:0] fs_pc;
 wire        fs_valid;
 reg  [31:0] refetch_pc;
@@ -363,33 +389,20 @@ wire is_direct_ad, is_map_ad;
 wire [31:0] p_inst_addr, p_data_addr; //物理地址
 assign is_direct_ad =  csr_crmd_da && !csr_crmd_pg;
 assign is_map_ad    = !csr_crmd_da &&  csr_crmd_pg;
-assign p_inst_addr = {is_map_ad ? (s0_hit ? {dmw_res0, ps_inst_addr[28:12]} : {s0_ppn[19:9], ((s0_ps == 6'h15) ? ps_inst_addr[20:12] : s0_ppn[8:0])}) : ps_inst_addr[31:12], ps_inst_addr[11:0]};
-assign p_data_addr = {is_map_ad ? (s1_hit ? {dmw_res1, es_data_addr[28:12]} : {s1_ppn[19:9], ((s1_ps == 6'h15) ? es_data_addr[20:12] : s1_ppn[8:0])}) : es_data_addr[31:12], es_data_addr[11:0]};
+assign p_inst_addr = {is_map_ad ? {dmw_res0, ps_inst_addr[28:12]} : ps_inst_addr[31:12], ps_inst_addr[11:0]};
+assign p_data_addr = {is_map_ad ? {dmw_res1, rs_data_addr[28:12]} : rs_data_addr[31:12], rs_data_addr[11:0]};
 
 //tlb_ex
-wire s0_refill_ex, s0_page_inv_ex, s0_ppi_ex;
-wire s1_refill_ex, s1_page_inv_ex, s1_ppi_ex, s1_pme_ex;
-assign s0_refill_ex = ps_inst_req && !s0_found && is_map_ad && !s0_hit;
-assign s0_page_inv_ex = ps_inst_req && is_map_ad && s0_found && !s0_v && !s0_hit;
-assign s0_ppi_ex = ps_inst_req && is_map_ad && (csr_crmd_plv > s0_plv) && !s0_refill_ex && !s0_page_inv_ex && !s0_hit;
-wire s1_req;
-assign s1_req = (es_data_req || es_is_cacop && cacop_code[4:3] == 2'b10);
-assign s1_refill_ex = s1_req && !s1_found && is_map_ad && !s1_hit;
-assign s1_page_inv_ex = s1_req && is_map_ad && s1_found && !s1_v && !s1_hit;
-assign s1_ppi_ex = s1_req && is_map_ad && (csr_crmd_plv > s1_plv) && !s1_refill_ex && !s1_page_inv_ex && !s1_hit;
-assign s1_pme_ex = s1_req && is_map_ad && s1_found && s1_v && !s1_ppi_ex && !s1_d && !s1_hit;
-
 //tlb_to_ps_bus
-assign tlb_to_ps_bus = {s0_ppi_ex, //2
-						s0_page_inv_ex, //1
-						s0_refill_ex //0
+assign tlb_to_ps_bus = {1'b0, //2
+						1'b0, //1
+						1'b0 //0
 					   };
-					   
-//tlb_to_es_bus
-assign tlb_to_es_bus = {s1_pme_ex, //3
-						s1_ppi_ex, //2
-						s1_page_inv_ex, //1
-						s1_refill_ex //0
+//tlb_to_rs_bus
+assign tlb_to_rs_bus = {1'b0, //3
+						1'b0, //2
+						1'b0, //1
+						1'b0 //0
 					   };
 
 
@@ -434,10 +447,9 @@ assign icache_op = |icache_wstrb;
 assign icache_wr_rdy = 1'b1; //icache不会写内存，置为1没有副作用
 
 assign icache_uncached = is_direct_ad && (datf != 2'b01) 
-                      || (is_map_ad && (s0_hit ? s0_hit_d_mat : s0_mat) != 2'b1);
+                      || (is_map_ad && (s0_hit_d_mat) != 2'b1);
 assign dcache_uncached = is_direct_ad && (datm != 2'b01) 
-                      || (is_map_ad && (s1_hit ? s1_hit_d_mat : s1_mat) != 2'b1)
-                      || p_data_addr[31:16] == 16'hbfaf; //这一行应该可以注释掉了
+                      || (is_map_ad && (s1_hit_d_mat) != 2'b1);
 
 //dcache
 wire         dcache_req      ;
@@ -463,6 +475,8 @@ wire         dcache_wr_rdy   ;
 
 assign dcache_op = |dcache_wstrb;
 
+assign es_br_taken = br_bus[`BR_BUS_WD - 1];
+
 //pre-IF stage
 pre_if_stage pre_if_stage(
     .clk            (clk              ),
@@ -481,12 +495,12 @@ pre_if_stage pre_if_stage(
 	//input
 	.ws_to_ps_bus   (ws_to_ps_bus     ),
     //icache interface
-    .inst_sram_en   (icache_req       ),//inst_sram_req    ),
-    .inst_sram_we   (icache_wstrb     ),//inst_sram_wstrb  ),
+    .inst_sram_en   (icache_req       ),
+    .inst_sram_we   (icache_wstrb     ),
     .inst_sram_addr (ps_inst_addr     ),
-    .inst_sram_wdata(icache_wdata     ),//inst_sram_wdata  ),
-	.addr_ok        (icache_addr_ok   ),//inst_sram_addr_ok),
-	.data_ok        (icache_data_ok   ),//inst_sram_data_ok),
+    .inst_sram_wdata(icache_wdata     ),
+	.addr_ok        (icache_addr_ok   ),
+	.data_ok        (icache_data_ok   ),
 	//tlb
 	.tlb_to_ps_bus  (tlb_to_ps_bus    ),
 	//refetch
@@ -496,7 +510,8 @@ pre_if_stage pre_if_stage(
     //cacop
     .fs_is_icacop   (fs_is_icacop     ),
     .ds_is_icacop   (ds_is_icacop     ),
-    .es_is_icacop   (es_is_icacop     )
+    .es_is_icacop   (es_is_icacop     ),
+    .rs_is_icacop   (rs_is_icacop     )
 );
 
 // IF stage
@@ -515,13 +530,13 @@ if_stage if_stage(
     //outputs
     .fs_to_ds_valid (fs_to_ds_valid   ),
     .fs_to_ds_bus   (fs_to_ds_bus     ),
-	//from ds
-	.ds_to_fs_bus   (ds_to_fs_bus     ),
 	//from ws
 	.ws_to_fs_bus   (ws_to_fs_bus     ),
+    //from es
+    .es_br_taken    (es_br_taken      ),
     //inst sram interface
-    .inst_sram_rdata(icache_rdata     ), //inst_sram_rdata  ),
-	.data_ok        (icache_data_ok   ), //inst_sram_data_ok),
+    .inst_sram_rdata(icache_rdata     ),
+	.data_ok        (icache_data_ok   ),
 	//refetch
 	.refetch        (refetch          ),
 	.fs_pc          (fs_pc            ),
@@ -542,54 +557,83 @@ id_stage id_stage(
     //to es
     .ds_to_es_valid (ds_to_es_valid ),
     .ds_to_es_bus   (ds_to_es_bus   ),
-    //to ps
-    .br_bus         (br_bus         ),
-	//to fs
-	.ds_to_fs_bus   (ds_to_fs_bus   ),
     //to rf: for write back
     .ws_to_rf_bus   (ws_to_rf_bus   ),
 	.es_to_ds_bus   (es_to_ds_bus   ),
+    .rs_to_ds_bus   (rs_to_ds_bus   ),
 	.ms_to_ds_bus   (ms_to_ds_bus   ),
 	.ws_to_ds_bus   (ws_to_ds_bus   ),
 	//refetch
 	.ds_refetch     (ds_refetch     ),
     //cacop
-    .ds_is_icacop   (ds_is_icacop   )
+    .ds_is_icacop   (ds_is_icacop   ),
+    //from es
+    .es_br_taken    (es_br_taken    )
+    `ifdef DIFFTEST_EN
+    ,
+    .rf_to_diff     (regs           )
+    `endif
 );
 // EXE stage
 exe_stage exe_stage(
     .clk            (clk              ),
     .reset          (reset            ),
     //allowin
-    .ms_allowin     (ms_allowin       ),
+    .rs_allowin     (rs_allowin       ),
     .es_allowin     (es_allowin       ),
     //from ds
     .ds_to_es_valid (ds_to_es_valid   ),
     .ds_to_es_bus   (ds_to_es_bus     ),
-    //to ms
-    .es_to_ms_valid (es_to_ms_valid   ),
-    .es_to_ms_bus   (es_to_ms_bus     ),
-    // data sram interface
-    .data_sram_en   (dcache_req       ), //data_sram_req    ),
-    .data_sram_we   (dcache_wstrb     ), //data_sram_wstrb  ),
-/* 	.data_sram_size (data_sram_size   ), */
-    .data_sram_addr (es_data_addr     ),
-    .data_sram_wdata(dcache_wdata     ), //data_sram_wdata  ),
+    //to rs
+    .es_to_rs_valid (es_to_rs_valid   ),
+    .es_to_rs_bus   (es_to_rs_bus     ),
+    //to ds
 	.es_to_ds_bus   (es_to_ds_bus     ),
+    //from ws
 	.ws_to_es_bus   (ws_to_es_bus     ),
-	.ms_to_es_bus   (ms_to_es_bus     ),
-	.addr_ok        (dcache_addr_ok   ), //data_sram_addr_ok),
-	.data_ok        (dcache_data_ok   ), //data_sram_data_ok),
-	//with tlb
-	.tlb_to_es_bus  (tlb_to_es_bus    ),
 	//refetch
 	.es_refetch     (es_refetch       ),
-	.es_data_req    (es_data_req      ),
     //cacop
     .es_is_icacop   (es_is_icacop     ),
-    .es_is_cacop    (es_is_cacop      ),
-    .cacop_code     (cacop_code       )
+    .br_bus         (br_bus           )
 );
+
+//PRE-MEM stage
+pre_mem_stage pre_mem_stage(
+    .clk            (clk            ),
+    .reset          (reset          ),
+    //allowin
+    .ms_allowin     (ms_allowin     ),
+    .rs_allowin     (rs_allowin     ),
+    //from es
+    .es_to_rs_valid (es_to_rs_valid ),
+    .es_to_rs_bus   (es_to_rs_bus   ),
+    //to ms
+    .rs_to_ms_valid (rs_to_ms_valid ),
+    .rs_to_ms_bus   (rs_to_ms_bus   ),
+    //from ms
+    .ms_to_rs_bus   (ms_to_rs_bus   ),
+    //inst sram interface
+    .data_sram_en   (dcache_req     ),
+    .data_sram_we   (dcache_wstrb   ),
+    .data_sram_addr (rs_data_addr   ),
+    .data_sram_wdata(dcache_wdata   ),
+    .addr_ok        (dcache_addr_ok ),
+    //to ds
+    .rs_to_ds_bus   (rs_to_ds_bus   ),
+    .ws_to_rs_bus   (ws_to_rs_bus   ),
+    //with tlb
+    .tlb_to_rs_bus  (tlb_to_rs_bus  ),
+    //refetch
+    .rs_refetch     (rs_refetch     ),
+    //cacop
+    .rs_is_icacop   (rs_is_icacop   ),
+    .rs_is_cacop    (rs_is_cacop    ),
+    .cacop_code     (cacop_code     ),
+    //to top
+    .rs_data_req    (rs_data_req    )
+);
+
 // MEM stage
 mem_stage mem_stage(
     .clk            (clk              ),
@@ -597,17 +641,18 @@ mem_stage mem_stage(
     //allowin
     .ws_allowin     (ws_allowin       ),
     .ms_allowin     (ms_allowin       ),
-    //from es
-    .es_to_ms_valid (es_to_ms_valid   ),
-    .es_to_ms_bus   (es_to_ms_bus     ),
+    //from rs
+    .rs_to_ms_valid (rs_to_ms_valid   ),
+    .rs_to_ms_bus   (rs_to_ms_bus     ),
     //to ws 
     .ms_to_ws_valid (ms_to_ws_valid   ),
     .ms_to_ws_bus   (ms_to_ws_bus     ),
     //from data-sram
-    .data_sram_rdata(dcache_rdata     ), //data_sram_rdata  ),
-	.data_ok        (dcache_data_ok   ), //data_sram_data_ok),
+    .data_sram_rdata(dcache_rdata     ),
+	.data_ok        (dcache_data_ok   ),
+
 	.ms_to_ds_bus   (ms_to_ds_bus     ),
-	.ms_to_es_bus   (ms_to_es_bus     ),
+    .ms_to_rs_bus   (ms_to_rs_bus     ),
 	.ws_to_ms_bus   (ws_to_ms_bus     ),
 	//refetch
 	.ms_refetch     (ms_refetch       )
@@ -630,6 +675,7 @@ wb_stage wb_stage(
     .debug_wb_rf_wdata(debug_wb_rf_wdata),
 	.ws_to_ds_bus     (ws_to_ds_bus     ),
 	.ws_to_es_bus     (ws_to_es_bus     ),
+    .ws_to_rs_bus     (ws_to_rs_bus     ),
 	.ws_to_ms_bus     (ws_to_ms_bus     ),
 	.ws_to_ps_bus     (ws_to_ps_bus     ),
 	.ws_to_fs_bus     (ws_to_fs_bus     ),
@@ -641,6 +687,24 @@ wb_stage wb_stage(
     //cache
     .datf             (datf             ),
     .datm             (datm             )
+
+    //difftest
+    `ifdef DIFFTEST_EN
+    ,
+    .debug_wb_inst   (debug_wb_inst     ),
+    .ws_valid_diff   (ws_valid_diff     ),
+    .cnt_inst_diff   (cnt_inst_diff     ),
+    .timer_64_diff   (timer_64_diff     ),
+    .inst_ld_en_diff (inst_ld_en_diff   ),
+    .ld_paddr_diff   (ld_paddr_diff     ),
+    .ld_vaddr_diff   (ld_vaddr_diff     ),
+    .inst_st_en_diff (inst_st_en_diff   ),
+    .st_paddr_diff   (st_paddr_diff     ),
+    .st_vaddr_diff   (st_vaddr_diff     ),
+    .st_data_diff    (st_data_diff      ),
+    .csr_rstat_en_diff (csr_rstat_en_diff    ),
+    .csr_data_diff   (csr_data_diff     )
+    `endif
 );
 
 sram_axi_bridge bridge(
@@ -654,22 +718,6 @@ sram_axi_bridge bridge(
     .icache_ret_valid (icache_ret_valid ),
     .icache_ret_last  (icache_ret_last  ),
     .icache_ret_data  (icache_ret_data  ),
-/*     .icache_wr_req    (icache_wr_req    ),
-    .icache_wr_type   (icache_wr_type   ),
-    .icache_wr_addr   (icache_wr_addr   ),
-    .icache_wr_wstrb  (icache_wr_wstrb  ),
-    .icache_wr_data   (icache_wr_data   ),
-    .icache_wr_rdy    (icache_wr_rdy    ), */
-
-/*   //inst_sram_req    ),
-    .inst_sram_wr     (inst_sram_wr     ),
-    .inst_sram_size   (inst_sram_size   ),
-    .inst_sram_wstrb  (inst_sram_wstrb  ),
-    .inst_sram_addr   (inst_sram_addr   ),
-    .inst_sram_wdata  (inst_sram_wdata  ),
-    .inst_sram_addr_ok(inst_sram_addr_ok),
-    .inst_sram_data_ok(inst_sram_data_ok),
-    .inst_sram_rdata  (inst_sram_rdata  ), */
 
     .dcache_rd_req    (dcache_rd_req    ),
     .dcache_rd_type   (dcache_rd_type   ),
@@ -684,16 +732,6 @@ sram_axi_bridge bridge(
     .dcache_wr_wstrb  (dcache_wr_wstrb  ),
     .dcache_wr_data   (dcache_wr_data   ),
     .dcache_wr_rdy    (dcache_wr_rdy    ),
-    
-/*     .data_sram_req    (data_sram_req    ),
-    .data_sram_wr     (data_sram_wr     ),
-    .data_sram_size   (data_sram_size   ),
-    .data_sram_wstrb  (data_sram_wstrb  ),
-    .data_sram_addr   (data_sram_addr   ),
-    .data_sram_wdata  (data_sram_wdata  ),
-    .data_sram_addr_ok(data_sram_addr_ok),
-    .data_sram_data_ok(data_sram_data_ok),
-    .data_sram_rdata  (data_sram_rdata  ), */
 	
     .arid      (arid      ),
     .araddr    (araddr    ),
@@ -737,86 +775,15 @@ sram_axi_bridge bridge(
     .bready    (bready    )
 );
 
-tlb tlb (
-    .clk          (clk         ),
-
-    // search port 0 (for fetch)
-    .s0_vppn      (s0_vppn     ),
-    .s0_va_bit12  (s0_va_bit12 ),
-    .s0_asid      (s0_asid     ),
-    .s0_found     (s0_found    ),
-    .s0_index     (s0_index    ),
-    .s0_ppn       (s0_ppn      ),
-    .s0_ps        (s0_ps       ),
-    .s0_plv       (s0_plv      ),
-    .s0_mat       (s0_mat      ),
-    .s0_d         (s0_d        ),
-    .s0_v         (s0_v        ),
-
-    // search port 1 (for load/store)
-    .s1_vppn      (s1_vppn     ),
-    .s1_va_bit12  (s1_va_bit12 ),
-    .s1_asid      (s1_asid     ),
-    .s1_found     (s1_found    ),
-    .s1_index     (s1_index    ),
-    .s1_ppn       (s1_ppn      ),
-    .s1_ps        (s1_ps       ),
-    .s1_plv       (s1_plv      ),
-    .s1_mat       (s1_mat      ),
-    .s1_d         (s1_d        ),
-    .s1_v         (s1_v        ),
-
-    // invtlb opcode
-    .invtlb_valid (invtlb_valid),
-    .invtlb_op    (invtlb_op   ),
-
-    // write port
-    .we           (we          ),
-    .w_index      (w_index     ),
-    .w_e          (w_e         ),
-    .w_vppn       (w_vppn      ),
-    .w_ps         (w_ps        ),
-    .w_asid       (w_asid      ),
-    .w_g          (w_g         ),
-    .w_ppn0       (w_ppn0      ),
-    .w_plv0       (w_plv0      ),
-    .w_mat0       (w_mat0      ),
-    .w_d0         (w_d0        ),
-    .w_v0         (w_v0        ),
-    .w_ppn1       (w_ppn1      ),
-    .w_plv1       (w_plv1      ),
-    .w_mat1       (w_mat1      ),
-    .w_d1         (w_d1        ),
-    .w_v1         (w_v1        ),
-
-    // read port
-    .r_index      (r_index     ),
-    .r_e          (r_e         ),
-    .r_vppn       (r_vppn      ),
-    .r_ps         (r_ps        ),
-    .r_asid       (r_asid      ),
-    .r_g          (r_g         ),
-    .r_ppn0       (r_ppn0      ),
-    .r_plv0       (r_plv0      ),
-    .r_mat0       (r_mat0      ),
-    .r_d0         (r_d0        ),
-    .r_v0         (r_v0        ),
-    .r_ppn1       (r_ppn1      ),
-    .r_plv1       (r_plv1      ),
-    .r_mat1       (r_mat1      ),
-    .r_d1         (r_d1        ),
-    .r_v1         (r_v1        )
-);
-
 //ps_inst_addr为虚地址，p_inst_addr为实地址
 cache icache (
     .clk     (clk               ),
     .resetn  (~reset            ),
     .valid   (icache_req        ),
     .op      (icache_op         ),
-    .index   (es_is_icacop ? es_data_addr[11:4] : ps_inst_addr[11:4]),
-    .tag     (es_is_icacop ? p_data_addr[31:12] : p_inst_addr[31:12]),
-    .offset  (es_is_icacop ? es_data_addr[3:0] : ps_inst_addr[3:0] ),
+    .index   (rs_is_icacop ? rs_data_addr[11:4] : ps_inst_addr[11:4]),
+    .tag     (rs_is_icacop ? p_data_addr[31:12] : p_inst_addr[31:12]),
+    .offset  (rs_is_icacop ? rs_data_addr[3:0] : ps_inst_addr[3:0] ),
     .wstrb   (icache_wstrb      ),
     .wdata   (icache_wdata      ),
     .addr_ok (icache_addr_ok    ),
@@ -838,7 +805,7 @@ cache icache (
     .wr_data  (icache_wr_data  ),
     .wr_rdy   (icache_wr_rdy   ),
     //cacop
-    .cacop_req(es_is_icacop    ),
+    .cacop_req(rs_is_icacop    ),
     .cacop_op (cacop_op        )
 );
 
@@ -847,9 +814,9 @@ cache dcache (
     .resetn  (~reset            ),
     .valid   (dcache_req        ),
     .op      (dcache_op         ),
-    .index   (es_data_addr[11:4]),
+    .index   (rs_data_addr[11:4]),
     .tag     (p_data_addr[31:12]),
-    .offset  (es_data_addr[3:0] ),
+    .offset  (rs_data_addr[3:0] ),
     .wstrb   (dcache_wstrb      ),
     .wdata   (dcache_wdata      ),
     .addr_ok (dcache_addr_ok    ),
@@ -871,7 +838,177 @@ cache dcache (
     .wr_data  (dcache_wr_data  ),
     .wr_rdy   (dcache_wr_rdy   ),
     //cacop
-    .cacop_req(es_is_dcacop    ),
+    .cacop_req(rs_is_dcacop    ),
     .cacop_op (cacop_op        )
 );
+///////////////////////////////////////////////////
+`ifdef DIFFTEST_EN
+// difftest
+
+always @(posedge aclk) begin
+    if (reset) begin
+        {cmt_valid, cmt_cnt_inst, cmt_timer_64, cmt_inst_ld_en, cmt_ld_paddr, cmt_ld_vaddr, cmt_inst_st_en, cmt_st_paddr, cmt_st_vaddr, cmt_st_data, cmt_csr_rstat_en, cmt_csr_data} <= 0;
+        {cmt_wen, cmt_wdest, cmt_wdata, cmt_pc, cmt_inst} <= 0;
+        {trap, trap_code, cycleCnt, instrCnt} <= 0;
+    end else if (~trap) begin
+        cmt_valid       <= inst_valid_diff          ;
+        cmt_cnt_inst    <= cnt_inst_diff            ;
+        cmt_timer_64    <= timer_64_diff            ;
+        cmt_inst_ld_en  <= inst_ld_en_diff          ;
+        cmt_ld_paddr    <= ld_paddr_diff            ;
+        cmt_ld_vaddr    <= ld_vaddr_diff            ;
+        cmt_inst_st_en  <= inst_st_en_diff          ;
+        cmt_st_paddr    <= st_paddr_diff            ;
+        cmt_st_vaddr    <= st_vaddr_diff            ;
+        cmt_st_data     <= st_data_diff             ;
+        cmt_csr_rstat_en<= csr_rstat_en_diff        ;
+        cmt_csr_data    <= csr_data_diff            ;
+
+        cmt_wen     <=  debug_wb_rf_we              ;
+        cmt_wdest   <=  {3'd0, debug_wb_rf_wnum}    ;
+        cmt_wdata   <=  debug_wb_rf_wdata           ;
+        cmt_pc      <=  debug_wb_pc                 ;
+        cmt_inst    <=  debug_wb_inst               ;
+
+        cmt_excp_flush  <= 1'b0; //excp_flush               ;
+        cmt_ertn        <= 1'b0; //ertn_flush               ;
+        cmt_csr_ecode   <=6'b0; //                ;
+        cmt_tlbfill_en  <= 1'b0; //tlbfill_en               ;
+        cmt_rand_index  <= 5'b0; //rand_index               ;
+
+        trap            <= 0                        ;
+        trap_code       <= regs[10][7:0]            ;
+        cycleCnt        <= cycleCnt + 1             ;
+        instrCnt        <= instrCnt + inst_valid_diff;
+    end
+end
+
+DifftestInstrCommit DifftestInstrCommit(
+    .clock              (aclk           ),
+    .coreid             (0              ),
+    .index              (0              ),
+    .valid              (cmt_valid      ),
+    .pc                 (cmt_pc         ),
+    .instr              (cmt_inst       ),
+    .skip               (0              ),
+    .is_TLBFILL         (/* cmt_tlbfill_en */1'b0 ),
+    .TLBFILL_index      (/* cmt_rand_index */5'b0 ),
+    .is_CNTinst         (cmt_cnt_inst   ),
+    .timer_64_value     (cmt_timer_64   ),
+    .wen                (cmt_wen        ),
+    .wdest              (cmt_wdest      ),
+    .wdata              (cmt_wdata      ),
+    .csr_rstat          (cmt_csr_rstat_en),
+    .csr_data           (cmt_csr_data   )
+);
+
+DifftestExcpEvent DifftestExcpEvent(
+    .clock              (aclk           ),
+    .coreid             (0              ),
+    .excp_valid         (/* cmt_excp_flush */1'b0 ),
+    .eret               (/* cmt_ertn */ 1'b0      ),
+    .intrNo             (csr_estat_diff_0[12:2]),
+    .cause              (cmt_csr_ecode  ),
+    .exceptionPC        (cmt_pc         ),
+    .exceptionInst      (cmt_inst       )
+);
+
+DifftestTrapEvent DifftestTrapEvent(
+    .clock              (aclk           ),
+    .coreid             (0              ),
+    .valid              (trap           ),
+    .code               (trap_code      ),
+    .pc                 (cmt_pc         ),
+    .cycleCnt           (cycleCnt       ),
+    .instrCnt           (instrCnt       )
+);
+
+DifftestStoreEvent DifftestStoreEvent(
+    .clock              (aclk           ),
+    .coreid             (0              ),
+    .index              (0              ),
+    .valid              (cmt_inst_st_en ),
+    .storePAddr         (cmt_st_paddr   ),
+    .storeVAddr         (cmt_st_vaddr   ),
+    .storeData          (cmt_st_data    )
+);
+
+DifftestLoadEvent DifftestLoadEvent(
+    .clock              (aclk           ),
+    .coreid             (0              ),
+    .index              (0              ),
+    .valid              (cmt_inst_ld_en ),
+    .paddr              (cmt_ld_paddr   ),
+    .vaddr              (cmt_ld_vaddr   )
+);
+
+DifftestCSRRegState DifftestCSRRegState(
+    .clock              (aclk               ),
+    .coreid             (0                  ),
+    .crmd               (csr_crmd_diff_0    ),
+    .prmd               (csr_prmd_diff_0    ),
+    .euen               (0                  ),
+    .ecfg               (csr_ectl_diff_0    ),
+    .estat              (csr_estat_diff_0   ),
+    .era                (csr_era_diff_0     ),
+    .badv               (csr_badv_diff_0    ),
+    .eentry             (csr_eentry_diff_0  ),
+    .tlbidx             (csr_tlbidx_diff_0  ),
+    .tlbehi             (csr_tlbehi_diff_0  ),
+    .tlbelo0            (csr_tlbelo0_diff_0 ),
+    .tlbelo1            (csr_tlbelo1_diff_0 ),
+    .asid               (csr_asid_diff_0    ),
+    .pgdl               (csr_pgdl_diff_0    ),
+    .pgdh               (csr_pgdh_diff_0    ),
+    .save0              (csr_save0_diff_0   ),
+    .save1              (csr_save1_diff_0   ),
+    .save2              (csr_save2_diff_0   ),
+    .save3              (csr_save3_diff_0   ),
+    .tid                (csr_tid_diff_0     ),
+    .tcfg               (csr_tcfg_diff_0    ),
+    .tval               (csr_tval_diff_0    ),
+    .ticlr              (csr_ticlr_diff_0   ),
+    .llbctl             (csr_llbctl_diff_0  ),
+    .tlbrentry          (csr_tlbrentry_diff_0),
+    .dmw0               (csr_dmw0_diff_0    ),
+    .dmw1               (csr_dmw1_diff_0    )
+);
+
+DifftestGRegState DifftestGRegState(
+    .clock              (aclk       ),
+    .coreid             (0          ),
+    .gpr_0              (0          ),
+    .gpr_1              (regs[1]    ),
+    .gpr_2              (regs[2]    ),
+    .gpr_3              (regs[3]    ),
+    .gpr_4              (regs[4]    ),
+    .gpr_5              (regs[5]    ),
+    .gpr_6              (regs[6]    ),
+    .gpr_7              (regs[7]    ),
+    .gpr_8              (regs[8]    ),
+    .gpr_9              (regs[9]    ),
+    .gpr_10             (regs[10]   ),
+    .gpr_11             (regs[11]   ),
+    .gpr_12             (regs[12]   ),
+    .gpr_13             (regs[13]   ),
+    .gpr_14             (regs[14]   ),
+    .gpr_15             (regs[15]   ),
+    .gpr_16             (regs[16]   ),
+    .gpr_17             (regs[17]   ),
+    .gpr_18             (regs[18]   ),
+    .gpr_19             (regs[19]   ),
+    .gpr_20             (regs[20]   ),
+    .gpr_21             (regs[21]   ),
+    .gpr_22             (regs[22]   ),
+    .gpr_23             (regs[23]   ),
+    .gpr_24             (regs[24]   ),
+    .gpr_25             (regs[25]   ),
+    .gpr_26             (regs[26]   ),
+    .gpr_27             (regs[27]   ),
+    .gpr_28             (regs[28]   ),
+    .gpr_29             (regs[29]   ),
+    .gpr_30             (regs[30]   ),
+    .gpr_31             (regs[31]   )
+);
+`endif
 endmodule

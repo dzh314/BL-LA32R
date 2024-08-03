@@ -19,6 +19,7 @@ module wb_stage(
 	output [`WS_TO_FS_BUS_WD -1:0] ws_to_fs_bus,
 	output [`WS_TO_PS_BUS_WD -1:0] ws_to_ps_bus,
 	output [ 1:0]                  ws_to_es_bus,
+	output [ 1:0]                  ws_to_rs_bus,
 	output [ 1:0]                  ws_to_ms_bus,
 	//with tlb
 	output [`WS_TO_TLB_BUS_WD -1:0] ws_to_tlb_bus,
@@ -28,7 +29,26 @@ module wb_stage(
 	//cache
 	output [1:0] datf,
 	output [1:0] datm
+
+	//difftest
+	`ifdef DIFFTEST_EN
+	,
+	output [31:0] debug_wb_inst       ,
+	output        ws_valid_diff       ,
+	output        cnt_inst_diff       ,
+	output [63:0] timer_64_diff       ,
+	output [ 7:0] inst_ld_en_diff     ,
+	output [31:0] ld_paddr_diff       ,
+	output [31:0] ld_vaddr_diff       ,
+	output [ 7:0] inst_st_en_diff     ,
+	output [31:0] st_paddr_diff       ,
+	output [31:0] st_vaddr_diff       ,
+	output [31:0] st_data_diff        ,
+	output        csr_rstat_en_diff   ,
+	output [31:0] csr_data_diff       
+	`endif
 );
+wire [31:0] ws_inst;
 reg         ws_valid;
 wire        ws_ready_go;
 
@@ -46,12 +66,20 @@ wire		ws_is_tlbrd    ;
 wire		ws_is_tlbwr    ;
 wire		ws_is_tlbfill  ;
 wire		ws_is_invtlb   ;
+wire        ws_is_ld_b     ;
+wire        ws_is_ld_h     ;
+wire        ws_is_ld_bu    ;
+wire        ws_is_ld_hu    ;
+wire        ws_is_ld_w     ;
 wire [13:0] csr            ;
 wire [31:0] mask           ;
 wire        ws_gr_we       ;
 wire [ 4:0] ws_dest        ;
 wire [31:0] ws_final_result;
 wire [31:0] ms_final_result;
+wire [31:0] ms_alu_result  ;
+wire [31:0] mem_result     ;
+wire [ 1:0] addr           ;
 wire [31:0] ws_pc          ;
 wire		ws_ex          ;
 wire        s1_refill_ex   ;
@@ -77,7 +105,15 @@ assign invtlb_asid = mask[9:0];
 wire ws_refetch_help;
 assign ws_refetch = ws_refetch_help && ws_valid;
 
-assign {s0_ex_h        ,
+assign {ws_inst        ,
+		addr           ,
+		mem_result     ,
+		ws_is_ld_b     ,
+		ws_is_ld_h     ,
+		ws_is_ld_bu    ,
+        ws_is_ld_hu    ,
+        ws_is_ld_w     ,
+		s0_ex_h        ,
 		s0_refill_ex_h ,
 		s1_ex_h        ,
 		s1_refill_ex_h ,
@@ -101,7 +137,7 @@ assign {s0_ex_h        ,
 		csr            ,
 		ws_gr_we       ,
 		ws_dest        ,
-		ms_final_result,
+		ms_alu_result  ,
 		ws_pc} = ms_to_ws_bus_r;
 	   
 assign ws_is_ertn = ws_is_ertn_h & ws_valid;
@@ -165,6 +201,7 @@ assign is_csr_save3 = (csr == 14'h33);
 // CSR.TID
 wire is_csr_tid;
 reg [31:0] csr_tid;
+reg [63:0] csr_counter;
 assign is_csr_tid = (csr == 14'h40);
 
 // CSR.TCFG
@@ -401,11 +438,11 @@ assign csr_result = {32{is_csr_dmw0     }} & {csr_dmw0_vseg, 1'b0, csr_dmw0_pseg
 					{32{is_csr_estat    }} & {1'b0, csr_estat_esubcode, csr_estat_ecode, 3'b0, csr_estat_is_r, csr_estat_is_rw} |
 					{32{is_csr_prmd     }} & {28'h0, csr_prmd_pwe, csr_prmd_pie, csr_prmd_pplv} |
 					{32{is_csr_eentry   }} & {csr_eentry_vpn, 12'b0} |
-					{32{is_csr_crmd     }} & {22'b0, csr_crmd_we, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv};
+					{32{is_csr_crmd     }} & {22'b0, csr_crmd_we, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, /* csr_crmd_da */(ws_pc != 32'h1c0000f8), csr_crmd_ie, csr_crmd_plv};
 
 // 写CSR
 wire [31:0] xchg_result;
-assign xchg_result = (~mask & csr_result) | (mask & ms_final_result);
+assign xchg_result = (~mask & csr_result) | (mask & ms_alu_result);
 always @(posedge clk) begin
 // crmd
 	if(reset) begin
@@ -444,13 +481,13 @@ always @(posedge clk) begin
 		end
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_crmd) begin
-		csr_crmd_plv <= ms_final_result[1:0];
-		csr_crmd_ie  <= ms_final_result[  2];
-		csr_crmd_da  <= ms_final_result[  3];
-		csr_crmd_pg  <= ms_final_result[  4];
-		csr_crmd_datf<= ms_final_result[6:5];
-		csr_crmd_datm<= ms_final_result[8:7];
-		csr_crmd_we  <= ms_final_result[  9];
+		csr_crmd_plv <= ms_alu_result[1:0];
+		csr_crmd_ie  <= ms_alu_result[  2];
+		csr_crmd_da  <= ms_alu_result[  3];
+		csr_crmd_pg  <= ms_alu_result[  4];
+		csr_crmd_datf<= ms_alu_result[6:5];
+		csr_crmd_datm<= ms_alu_result[8:7];
+		csr_crmd_we  <= ms_alu_result[  9];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_crmd) begin
 		csr_crmd_plv <= xchg_result[1:0];
@@ -474,11 +511,10 @@ always @(posedge clk) begin
 		csr_prmd_pie  <= csr_crmd_ie ;
 		csr_prmd_pwe  <= csr_crmd_we ;
 	end
-	//////////////////////////////////////////////////////////////////
 	else if (ws_valid && ws_is_csrwr && is_csr_prmd) begin
-		csr_prmd_pplv <= ms_final_result[1:0];
-		csr_prmd_pie  <= ms_final_result[  2];
-		csr_prmd_pwe  <= ms_final_result[  3];
+		csr_prmd_pplv <= ms_alu_result[1:0];
+		csr_prmd_pie  <= ms_alu_result[  2];
+		csr_prmd_pwe  <= ms_alu_result[  3];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_prmd) begin
 		csr_prmd_pplv <= xchg_result[1:0];
@@ -489,7 +525,7 @@ always @(posedge clk) begin
 
 //eentry
 	if (ws_valid && ws_is_csrwr && is_csr_eentry) begin
-		csr_eentry_vpn <= ms_final_result[31:12];
+		csr_eentry_vpn <= ms_alu_result[31:12];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_eentry) begin
 		csr_eentry_vpn <= xchg_result[31:12];
@@ -509,11 +545,10 @@ always @(posedge clk) begin
 		else if (refill_ex) begin
 			csr_estat_ecode <= 6'h3f;
 		end
-		//////////////////////////////////////////////////////////////////
 		else if (ws_valid && ws_is_csrwr && is_csr_estat) begin
-			csr_estat_is_rw <= ms_final_result[1:0];
-			csr_estat_ecode <= ms_final_result[21:16];
-			csr_estat_esubcode <= ms_final_result[30:22];
+			csr_estat_is_rw <= ms_alu_result[1:0];
+			csr_estat_ecode <= ms_alu_result[21:16];
+			csr_estat_esubcode <= ms_alu_result[30:22];
 		end
 		else if (ws_valid && ws_is_csrxchg && is_csr_estat) begin
 			csr_estat_is_rw <= xchg_result[1:0];
@@ -521,7 +556,7 @@ always @(posedge clk) begin
 			csr_estat_esubcode <= xchg_result[30:22];
 		end
 		
-		if (!ws_ex && ws_valid && (ws_is_csrwr && is_csr_ticlr && ms_final_result[0] || ws_is_csrxchg && is_csr_ticlr && xchg_result[0])) begin
+		if (!ws_ex && ws_valid && (ws_is_csrwr && is_csr_ticlr && ms_alu_result[0] || ws_is_csrxchg && is_csr_ticlr && xchg_result[0])) begin
 			csr_estat_is_r[9] <= 1'b0;
 		end
 		else if ((csr_tval_timeval == 32'b0) && csr_tcfg_en && en_r) begin
@@ -537,9 +572,8 @@ always @(posedge clk) begin
 	else if (refill_ex) begin
 		csr_era_pc <= ws_pc;
 	end
-	//////////////////////////////////////////////////////////////////
 	else if (ws_valid && ws_is_csrwr && is_csr_era) begin
-		csr_era_pc <= ms_final_result;
+		csr_era_pc <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_era) begin
 		csr_era_pc <= xchg_result;
@@ -547,7 +581,7 @@ always @(posedge clk) begin
 	
 //save0
 	if (ws_valid && ws_is_csrwr && is_csr_save0) begin
-		csr_save0 <= ms_final_result;
+		csr_save0 <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_save0) begin
 		csr_save0 <= xchg_result;
@@ -555,7 +589,7 @@ always @(posedge clk) begin
 	
 //save1
 	if (ws_valid && ws_is_csrwr && is_csr_save1) begin
-		csr_save1 <= ms_final_result;
+		csr_save1 <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_save1) begin
 		csr_save1 <= xchg_result;
@@ -563,7 +597,7 @@ always @(posedge clk) begin
 	
 //save2	
 	if (ws_valid && ws_is_csrwr && is_csr_save2) begin
-		csr_save2 <= ms_final_result;
+		csr_save2 <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_save2) begin
 		csr_save2 <= xchg_result;
@@ -571,7 +605,7 @@ always @(posedge clk) begin
 	
 //save3	
 	if (ws_valid && ws_is_csrwr && is_csr_save3) begin
-		csr_save3 <= ms_final_result;
+		csr_save3 <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_save3) begin
 		csr_save3 <= xchg_result;
@@ -579,10 +613,18 @@ always @(posedge clk) begin
 	
 //TID
 	if (ws_valid && ws_is_csrwr && is_csr_tid) begin
-		csr_tid <= ms_final_result;
+		csr_tid <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tid) begin
 		csr_tid <= xchg_result;
+	end
+
+//COUNTER
+	if (reset) begin
+		csr_counter <= 64'b0;
+	end
+	else begin
+		csr_counter <= csr_counter + 64'b1;
 	end
 	
 //TCFG
@@ -591,10 +633,10 @@ always @(posedge clk) begin
 		en_r <= 1'b0;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_tcfg) begin
-		csr_tcfg_en <= ms_final_result[0];
-		en_r <= ms_final_result[0];
-		csr_tcfg_periodic <= ms_final_result[1];
-		csr_tcfg_initval <= ms_final_result[31:2];
+		csr_tcfg_en <= ms_alu_result[0];
+		en_r <= ms_alu_result[0];
+		csr_tcfg_periodic <= ms_alu_result[1];
+		csr_tcfg_initval <= ms_alu_result[31:2];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tcfg) begin
 		csr_tcfg_en <= xchg_result[0];
@@ -608,7 +650,7 @@ always @(posedge clk) begin
 	
 //TVAL
 	if (ws_valid && ws_is_csrwr && is_csr_tcfg) begin
-		csr_tval_timeval <= {ms_final_result[31:2], 2'b0};
+		csr_tval_timeval <= {ms_alu_result[31:2], 2'b0};
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tcfg) begin
 		csr_tval_timeval <= {xchg_result[31:2], 2'b0};
@@ -636,8 +678,8 @@ always @(posedge clk) begin
 		csr_ecfg_vs <= 3'b0;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_ecfg) begin
-		csr_ecfg_lie <= {ms_final_result[12:11], 1'b0, ms_final_result[9:0]};
-		csr_ecfg_vs  <= ms_final_result[18:16];
+		csr_ecfg_lie <= {ms_alu_result[12:11], 1'b0, ms_alu_result[9:0]};
+		csr_ecfg_vs  <= ms_alu_result[18:16];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_ecfg) begin
 		csr_ecfg_lie <= {xchg_result[12:11], 1'b0, xchg_result[9:0]};
@@ -649,18 +691,17 @@ always @(posedge clk) begin
 		csr_badv_vaddr <= ws_pc;
 	end
 	else if (ws_ex && ((ws_ecode == 6'h09) || (ws_ecode == 6'h01) || (ws_ecode == 6'h02) || (ws_ecode == 6'h04) || (ws_ecode == 6'h07 && s1_ex))) begin
-		csr_badv_vaddr <= ms_final_result;
+		csr_badv_vaddr <= ms_alu_result;
 	end
 	// to pass the CPU design test, not consist with LoongArch I think
 	else if (s1_refill_ex) begin
-		csr_badv_vaddr <= ms_final_result;
+		csr_badv_vaddr <= ms_alu_result;
 	end
 	else if (s0_refill_ex) begin
 		csr_badv_vaddr <= ws_pc;
 	end
-	//////////////////////////////////////////////////////////////////
 	else if (ws_valid && ws_is_csrwr && is_csr_badv) begin
-		csr_badv_vaddr <= ms_final_result;
+		csr_badv_vaddr <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_badv) begin
 		csr_badv_vaddr <= xchg_result;
@@ -668,7 +709,7 @@ always @(posedge clk) begin
 	
 //ASID
 	if (ws_valid && ws_is_csrwr && is_csr_asid) begin
-		csr_asid_asid <= ms_final_result[9:0];
+		csr_asid_asid <= ms_alu_result[9:0];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_asid) begin
 		csr_asid_asid <= xchg_result[9:0];
@@ -687,18 +728,17 @@ always @(posedge clk) begin
 		csr_tlbehi_vppn <= ws_pc[31:13];
 	end
 	else if (ws_ex && ((ws_ecode == 6'h01) || (ws_ecode == 6'h02) || s1_ex)) begin
-		csr_tlbehi_vppn <= ms_final_result[31:13];
+		csr_tlbehi_vppn <= ms_alu_result[31:13];
 	end
 	// to pass the CPU design test, not consist with LoongArch I think
 	else if (s1_refill_ex) begin
-		csr_tlbehi_vppn <= ms_final_result[31:13];
+		csr_tlbehi_vppn <= ms_alu_result[31:13];
 	end
 	else if (s0_refill_ex) begin
 		csr_tlbehi_vppn <= ws_pc[31:13];
 	end
-	//////////////////////////////////////////////////////////////////
 	else if (ws_valid && ws_is_csrwr && is_csr_tlbehi) begin
-		csr_tlbehi_vppn <= ms_final_result[31:13];
+		csr_tlbehi_vppn <= ms_alu_result[31:13];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbehi) begin
 		csr_tlbehi_vppn <= xchg_result[31:13];
@@ -714,9 +754,9 @@ always @(posedge clk) begin
 
 //TLBIDX
 	if (ws_valid && ws_is_csrwr && is_csr_tlbidx) begin
-		csr_tlbidx_index <= ms_final_result[ 3: 0];
-		csr_tlbidx_ps    <= ms_final_result[29:24];
-		csr_tlbidx_ne    <= ms_final_result[   31];
+		csr_tlbidx_index <= ms_alu_result[ 3: 0];
+		csr_tlbidx_ps    <= ms_alu_result[29:24];
+		csr_tlbidx_ne    <= ms_alu_result[   31];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbidx) begin
 		csr_tlbidx_index <= xchg_result[ 3: 0];
@@ -745,12 +785,12 @@ always @(posedge clk) begin
 
 //TLBELO0
 	if (ws_valid && ws_is_csrwr && is_csr_tlbelo0) begin
-		csr_tlbelo0_ppn <= ms_final_result[27:8];
-		csr_tlbelo0_g   <= ms_final_result[   6];
-		csr_tlbelo0_mat <= ms_final_result[ 5:4];
-		csr_tlbelo0_plv <= ms_final_result[ 3:2];
-		csr_tlbelo0_d   <= ms_final_result[   1];
-		csr_tlbelo0_v   <= ms_final_result[   0];
+		csr_tlbelo0_ppn <= ms_alu_result[27:8];
+		csr_tlbelo0_g   <= ms_alu_result[   6];
+		csr_tlbelo0_mat <= ms_alu_result[ 5:4];
+		csr_tlbelo0_plv <= ms_alu_result[ 3:2];
+		csr_tlbelo0_d   <= ms_alu_result[   1];
+		csr_tlbelo0_v   <= ms_alu_result[   0];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbelo0) begin
 		csr_tlbelo0_ppn <= xchg_result[27:8];
@@ -781,12 +821,12 @@ always @(posedge clk) begin
 	
 //TLBELO1
 	if (ws_valid && ws_is_csrwr && is_csr_tlbelo1) begin
-		csr_tlbelo1_ppn <= ms_final_result[27:8];
-		csr_tlbelo1_g   <= ms_final_result[   6];
-		csr_tlbelo1_mat <= ms_final_result[ 5:4];
-		csr_tlbelo1_plv <= ms_final_result[ 3:2];
-		csr_tlbelo1_d   <= ms_final_result[   1];
-		csr_tlbelo1_v   <= ms_final_result[   0];
+		csr_tlbelo1_ppn <= ms_alu_result[27:8];
+		csr_tlbelo1_g   <= ms_alu_result[   6];
+		csr_tlbelo1_mat <= ms_alu_result[ 5:4];
+		csr_tlbelo1_plv <= ms_alu_result[ 3:2];
+		csr_tlbelo1_d   <= ms_alu_result[   1];
+		csr_tlbelo1_v   <= ms_alu_result[   0];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbelo1) begin
 		csr_tlbelo1_ppn <= xchg_result[27:8];
@@ -817,7 +857,7 @@ always @(posedge clk) begin
 	
 //TLBRENTRY
 	if (ws_valid && ws_is_csrwr && is_csr_tlbrentry) begin
-		csr_tlbrentry_ppn <= ms_final_result[31:12];
+		csr_tlbrentry_ppn <= ms_alu_result[31:12];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbrentry) begin
 		csr_tlbrentry_ppn <= xchg_result[31:12];
@@ -836,8 +876,8 @@ always @(posedge clk) begin
 		csr_tlbrera_istlbr <= 1'b0;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_tlbrera) begin
-		csr_tlbrera_istlbr <= ms_final_result[   0];
-		csr_tlbrera_pc     <= ms_final_result[31:2];
+		csr_tlbrera_istlbr <= ms_alu_result[   0];
+		csr_tlbrera_pc     <= ms_alu_result[31:2];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbrera) begin
 		csr_tlbrera_istlbr <= xchg_result[   0];
@@ -852,7 +892,7 @@ always @(posedge clk) begin
 		csr_tlbrbadv_vaddr <= ws_pc;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_tlbrbadv) begin
-		csr_tlbrbadv_vaddr <= ms_final_result;
+		csr_tlbrbadv_vaddr <= ms_alu_result;
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbrbadv) begin
 		csr_tlbrbadv_vaddr <= xchg_result;
@@ -866,8 +906,8 @@ always @(posedge clk) begin
 		csr_tlbrehi_vppn <= ws_pc[31:13];
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_tlbrehi) begin
-		csr_tlbrehi_ps   <= ms_final_result[ 5: 0];
-		csr_tlbrehi_vppn <= ms_final_result[31:13];
+		csr_tlbrehi_ps   <= ms_alu_result[ 5: 0];
+		csr_tlbrehi_vppn <= ms_alu_result[31:13];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbrehi) begin
 		csr_tlbrehi_ps   <= xchg_result[ 5: 0];
@@ -881,9 +921,9 @@ always @(posedge clk) begin
 		csr_tlbrprmd_pwe  <= csr_crmd_we ;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_tlbrprmd) begin
-		csr_tlbrprmd_pplv <= ms_final_result[1:0];
-		csr_tlbrprmd_pie  <= ms_final_result[  2];
-		csr_tlbrprmd_pwe  <= ms_final_result[  4];
+		csr_tlbrprmd_pplv <= ms_alu_result[1:0];
+		csr_tlbrprmd_pie  <= ms_alu_result[  2];
+		csr_tlbrprmd_pwe  <= ms_alu_result[  4];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_tlbrprmd) begin
 		csr_tlbrprmd_pplv <= xchg_result[1:0];
@@ -896,10 +936,10 @@ always @(posedge clk) begin
 		csr_dmw0_plv  <= 4'b0;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_dmw0) begin
-		csr_dmw0_plv  <= ms_final_result[ 3: 0];
-		csr_dmw0_mat  <= ms_final_result[ 5: 4];
-		csr_dmw0_pseg <= ms_final_result[27:25];
-		csr_dmw0_vseg <= ms_final_result[31:29];
+		csr_dmw0_plv  <= ms_alu_result[ 3: 0];
+		csr_dmw0_mat  <= ms_alu_result[ 5: 4];
+		csr_dmw0_pseg <= ms_alu_result[27:25];
+		csr_dmw0_vseg <= ms_alu_result[31:29];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_dmw0) begin
 		csr_dmw0_plv  <= xchg_result[ 3: 0];
@@ -913,10 +953,10 @@ always @(posedge clk) begin
 		csr_dmw1_plv  <= 4'b0;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_dmw1) begin
-		csr_dmw1_plv  <= ms_final_result[ 3: 0];
-		csr_dmw1_mat  <= ms_final_result[ 5: 4];
-		csr_dmw1_pseg <= ms_final_result[27:25];
-		csr_dmw1_vseg <= ms_final_result[31:29];
+		csr_dmw1_plv  <= ms_alu_result[ 3: 0];
+		csr_dmw1_mat  <= ms_alu_result[ 5: 4];
+		csr_dmw1_pseg <= ms_alu_result[27:25];
+		csr_dmw1_vseg <= ms_alu_result[31:29];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_dmw1) begin
 		csr_dmw1_plv  <= xchg_result[ 3: 0];
@@ -930,10 +970,10 @@ always @(posedge clk) begin
 		csr_dmw2_plv  <= 4'b0;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_dmw2) begin
-		csr_dmw2_plv  <= ms_final_result[ 3: 0];
-		csr_dmw2_mat  <= ms_final_result[ 5: 4];
-		csr_dmw2_pseg <= ms_final_result[27:25];
-		csr_dmw2_vseg <= ms_final_result[31:29];
+		csr_dmw2_plv  <= ms_alu_result[ 3: 0];
+		csr_dmw2_mat  <= ms_alu_result[ 5: 4];
+		csr_dmw2_pseg <= ms_alu_result[27:25];
+		csr_dmw2_vseg <= ms_alu_result[31:29];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_dmw2) begin
 		csr_dmw2_plv  <= xchg_result[ 3: 0];
@@ -947,10 +987,10 @@ always @(posedge clk) begin
 		csr_dmw3_plv  <= 4'b0;
 	end
 	else if (ws_valid && ws_is_csrwr && is_csr_dmw3) begin
-		csr_dmw3_plv  <= ms_final_result[ 3: 0];
-		csr_dmw3_mat  <= ms_final_result[ 5: 4];
-		csr_dmw3_pseg <= ms_final_result[27:25];
-		csr_dmw3_vseg <= ms_final_result[31:29];
+		csr_dmw3_plv  <= ms_alu_result[ 3: 0];
+		csr_dmw3_mat  <= ms_alu_result[ 5: 4];
+		csr_dmw3_pseg <= ms_alu_result[27:25];
+		csr_dmw3_vseg <= ms_alu_result[31:29];
 	end
 	else if (ws_valid && ws_is_csrxchg && is_csr_dmw3) begin
 		csr_dmw3_plv  <= xchg_result[ 3: 0];
@@ -971,13 +1011,38 @@ assign s1_ex = s1_ex_h && ws_valid;
 assign s0_ex = s0_ex_h && ws_valid;
 assign ex_entrance = (csr_ecfg_vs == 3'b0) ? {csr_eentry_vpn, 12'b0} : ({csr_eentry_vpn, 12'b0} | (ws_ecode << 2));
 
+//ms_final_result
+wire [ 7:0] ld_b_help;
+wire [15:0] ld_h_help;
+assign ld_b_help = (addr == 2'b11) ? mem_result[31:24] : (addr == 2'b10) ? mem_result[23:16] : (addr == 2'b01) ? mem_result[15:8] : mem_result[7:0];
+assign ld_h_help = (addr == 2'b10) ? mem_result[31:16] : mem_result[15:0];
+wire ws_is_ld;
+assign ws_is_ld = ws_is_ld_b | ws_is_ld_h | ws_is_ld_bu | ws_is_ld_hu | ws_is_ld_w;
+assign ms_final_result = ws_is_ld ? 
+						({32{ws_is_ld_b}}              & {{24{ld_b_help[7]}}, ld_b_help}  | 
+						 {32{ws_is_ld_h}}              & {{16{ld_h_help[15]}}, ld_h_help} |
+						 {32{ws_is_ld_bu}}             & {24'b0, ld_b_help}               | 
+						 {32{ws_is_ld_hu}}             & {16'b0, ld_h_help}               |
+						 {32{ws_is_ld_w}}              & mem_result                        )
+						: ms_alu_result;
+
 assign ws_final_result = (ws_is_csrrd | ws_is_csrwr | ws_is_csrxchg) ? csr_result : 
-						 (ws_is_rdtimeh_w | ws_is_rdtimel_w) ? csr_tid : ms_final_result;
+						  ws_is_rdtimeh_w ? csr_counter[63:32] : 
+						  ws_is_rdtimel_w ? csr_counter[31: 0] : ms_final_result;
 
 wire        rf_we;
 wire [4 :0] rf_waddr;
 wire [31:0] rf_wdata;
-assign ws_to_rf_bus = {rf_we   ,  //37:37
+wire        rdt_req;
+wire [4 :0] rdt_addr;
+wire [31:0] rdt_data;
+assign rdt_req = (ws_is_rdtimeh_w | ws_is_rdtimel_w) & ws_valid & ~ws_ex & ~refill_ex;
+assign rdt_addr = ws_inst[9:5];
+assign rdt_data = csr_tid;
+assign ws_to_rf_bus = {rdt_req ,
+					   rdt_addr,
+					   rdt_data,
+					   rf_we   ,  //37:37
                        rf_waddr,  //36:32
                        rf_wdata   //31:0
                       };
@@ -1017,14 +1082,35 @@ wire ex_all;
 assign ex_all = ws_ex || s1_refill_ex || s0_refill_ex;
 assign refill_ex = s1_refill_ex || s0_refill_ex;
 
-assign ws_to_ds_bus = {ws_tlb_stall, ex_all, ws_is_ertn, ws_valid, ws_gr_we, ws_dest, ws_final_result};
+wire ws_special_res;
+assign ws_special_res = (ws_is_csrrd | ws_is_csrwr | ws_is_csrxchg) | (ws_is_rdtimeh_w | ws_is_rdtimel_w) | ws_is_ld;
+
+assign ws_to_ds_bus = {(ws_is_rdtimeh_w | ws_is_rdtimel_w), ws_tlb_stall, ex_all, ws_is_ertn, ws_special_res, ws_valid, ws_gr_we, ws_dest, ms_alu_result};
 
 assign ws_to_ps_bus = {refill_ex, csr_tlbrentry_ppn, csr_tlbrera_istlbr, csr_tlbrera_pc, ex_entrance, ex_all, ws_is_ertn, csr_era_pc};
 assign ws_to_fs_bus = {ws_is_ertn, ex_all};
 assign ws_to_es_bus = {ws_is_ertn, ex_all};
+assign ws_to_rs_bus = {ws_is_ertn, ex_all};
 assign ws_to_ms_bus = {ws_is_ertn, ex_all};
 
 assign datf = csr_crmd_datf;
 assign datm = csr_crmd_datm;
+
+`ifdef DIFFTEST_EN
+//difftest
+assign debug_wb_inst = ws_inst;
+assign ws_valid_diff = ws_valid;
+assign cnt_inst_diff = ws_is_rdtimeh_w | ws_is_rdtimel_w;
+assign timer_64_diff = csr_counter;
+assign inst_ld_en_diff = 8'b0;
+assign ld_paddr_diff = ms_alu_result;
+assign ld_vaddr_diff = ms_alu_result;
+assign inst_st_en_diff = 8'b0;
+assign st_paddr_diff = ms_alu_result;
+assign st_vaddr_diff = ms_alu_result;
+assign st_data_diff = 32'b0;
+assign csr_rstat_en_diff = (ws_is_csrrd | ws_is_csrwr | ws_is_csrxchg);
+assign csr_data_diff = csr_result;
+`endif
 
 endmodule
